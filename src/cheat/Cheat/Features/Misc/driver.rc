@@ -1,0 +1,4 @@
+// RTCore64 driver embedded as encrypted resource
+// The actual .bin file is the XOR-encrypted RTCore64.sys
+// Generate it with: python encrypt_driver.py rtc64.sys rtc64.bin 0xAB
+IDR_DRIVER_BIN  RCDATA  "rtc64.bin"

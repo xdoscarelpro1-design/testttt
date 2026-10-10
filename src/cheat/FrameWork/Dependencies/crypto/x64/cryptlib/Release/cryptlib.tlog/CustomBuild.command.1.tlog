@@ -1,0 +1,9 @@
+^C:\USERS\ADMINISTRATOR\DESKTOP\EMPTY\CPP\EMPTY\INCLUDES\CRYPTO\ADHOC.CPP.PROTO
+if not exist adhoc.cpp copy "C:\Users\Administrator\Desktop\EMPTY\cpp\empty\includes\crypto\adhoc.cpp.proto" adhoc.cpp
+        echo: >> adhoc.cpp.copied
+^C:\USERS\ADMINISTRATOR\DESKTOP\EMPTY\CPP\EMPTY\INCLUDES\CRYPTO\RDRAND.ASM
+ml64.exe /c /nologo /D_M_X64 /W3 /Cx /Zi /Fo"x64\cryptlib\Release\rdrand-x64.obj" "C:\Users\Administrator\Desktop\EMPTY\cpp\empty\includes\crypto\rdrand.asm"
+^C:\USERS\ADMINISTRATOR\DESKTOP\EMPTY\CPP\EMPTY\INCLUDES\CRYPTO\X64DLL.ASM
+ml64.exe /c /nologo /D_M_X64 /W3 /Zi /Fo"x64\cryptlib\Release\x64dll.obj" "C:\Users\Administrator\Desktop\EMPTY\cpp\empty\includes\crypto\x64dll.asm"
+^C:\USERS\ADMINISTRATOR\DESKTOP\EMPTY\CPP\EMPTY\INCLUDES\CRYPTO\X64MASM.ASM
+ml64.exe /c /nologo /D_M_X64 /W3 /Zi /Fo"x64\cryptlib\Release\x64masm.obj" "C:\Users\Administrator\Desktop\EMPTY\cpp\empty\includes\crypto\x64masm.asm"
