@@ -1,0 +1,12 @@
+build/
+*.o
+*.so
+*.efi
+*.bin
+*.img
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
