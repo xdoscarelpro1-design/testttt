@@ -1,8 +1,7 @@
 #ifndef _BOOTKIT_H_
 #define _BOOTKIT_H_
 
-#include <efi.h>
-#include <efilib.h>
+#include "efi_defs.h"
 
 #define BK_VERSION          "1.0.0"
 #define BK_CODENAME         "PHANTOM"

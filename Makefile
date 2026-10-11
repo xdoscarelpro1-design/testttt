@@ -1,19 +1,22 @@
 # ────────────────────────────────────────────────────────────────
-#  PHANTOM EFI Bootkit — Build System
+#  PHANTOM EFI Bootkit — Build System (mingw-direct PE)
 # ────────────────────────────────────────────────────────────────
 #
 #  Build chain (order matters):
-#    1. Cheat DLL      — x86_64 Windows DLL from C++ sources
+#    1. Cheat DLL      — x86_64 Windows DLL (MSVC on Windows)
 #    2. Cheat blob     — DLL binary → C byte array header
 #    3. Kernel payload — PIC kernel code + embedded cheat blob
 #    4. Payload blob   — kernel binary → C byte array header
-#    5. EFI bootkit    — UEFI application embedding the payload
+#    5. EFI bootkit    — UEFI PE32+ application embedding the payload
+#
+#  No gnu-efi dependency. Compiled directly to PE with mingw
+#  using --subsystem,10 (EFI application). Tested on real hardware.
 #
 #  Prerequisites:
-#    - gnu-efi development package (apt install gnu-efi)
-#    - GCC cross-compiler for EFI (or native x86_64 GCC on Linux)
-#    - x86_64-w64-mingw32-g++ (for cheat DLL and kernel payload)
+#    - x86_64-w64-mingw32-gcc
+#    - objcopy (for kernel payload binary extraction)
 #    - python3 (for blob generation)
+#    - mtools (for USB image)
 #
 #  Targets:
 #    make all        — build everything (cheat → kernel → EFI)
@@ -26,18 +29,9 @@
 # ────────────────────────────────────────────────────────────────
 
 # ─── toolchain ───
-CC          := gcc
 MINGW_CC    := x86_64-w64-mingw32-gcc
 MINGW_CXX   := x86_64-w64-mingw32-g++
 OBJCOPY     := objcopy
-LD          := ld
-
-# ─── gnu-efi paths ───
-EFI_INC     := /usr/include/efi
-EFI_INC_X64 := /usr/include/efi/x86_64
-EFI_LIB     := /usr/lib
-EFI_CRT     := /usr/lib/crt0-efi-x86_64.o
-EFI_LDS     := /usr/lib/elf_x86_64_efi.lds
 
 # ─── directories ───
 SRC_EFI     := src/efi
@@ -50,31 +44,19 @@ BUILD_KERN  := $(BUILD)/kernel
 BUILD_CHEAT := $(BUILD)/cheat
 BUILD_USB   := $(BUILD)/usb
 
-# ─── flags ───
-CFLAGS_COMMON := -Wall -Wextra -O2 -I$(INC)
-
-# EFI flags (position-independent, no standard libs)
-CFLAGS_EFI  := $(CFLAGS_COMMON) \
-               -I$(EFI_INC) -I$(EFI_INC_X64) \
-               -fpic -ffreestanding -fno-stack-protector \
+# ─── EFI flags (mingw-direct PE, no gnu-efi) ───
+CFLAGS_EFI  := -Wall -Wextra -O2 -I$(INC) \
+               -ffreestanding -fno-stack-protector \
                -fno-stack-check -fshort-wchar -mno-red-zone \
-               -maccumulate-outgoing-args \
-               -DEFI_FUNCTION_WRAPPER \
-               -DGNU_EFI_USE_MS_ABI
+               -maccumulate-outgoing-args -fno-builtin
 
-LDFLAGS_EFI := -nostdlib -znocombreloc -T $(EFI_LDS) \
-               -shared -Bsymbolic \
-               -L$(EFI_LIB) $(EFI_CRT)
-
-LIBS_EFI    := -lefi -lgnuefi
-
-# Kernel payload flags (position-independent, freestanding)
+# ─── Kernel payload flags (position-independent, freestanding) ───
 CFLAGS_KERN := -ffreestanding -fno-stack-protector \
                -fPIC -mno-red-zone -nostdlib \
                -fno-exceptions -fno-asynchronous-unwind-tables \
                -O2 -I$(INC)
 
-# Cheat DLL flags (Windows x86_64 usermode)
+# ─── Cheat DLL flags (Windows x86_64 usermode) ───
 CFLAGS_CHEAT := -O2 -I$(INC) -I$(SRC_CHEAT) \
                 -DUNICODE -D_UNICODE \
                 -std=c++17 -fno-rtti -fno-exceptions \
@@ -85,7 +67,8 @@ EFI_SRCS    := $(SRC_EFI)/main.c \
                $(SRC_EFI)/hooks.c \
                $(SRC_EFI)/pe.c \
                $(SRC_EFI)/patterns.c \
-               $(SRC_EFI)/payload.c
+               $(SRC_EFI)/payload.c \
+               $(SRC_EFI)/efi_util.c
 
 KERN_SRCS   := $(SRC_KERNEL)/entry.c \
                $(SRC_KERNEL)/bypass.c \
@@ -102,7 +85,6 @@ EFI_OBJS    := $(patsubst $(SRC_EFI)/%.c,$(BUILD_EFI)/%.o,$(EFI_SRCS))
 KERN_OBJS   := $(patsubst $(SRC_KERNEL)/%.c,$(BUILD_KERN)/%.o,$(KERN_SRCS))
 
 # ─── outputs ───
-EFI_SO      := $(BUILD_EFI)/bootx64.so
 EFI_BIN     := $(BUILD_EFI)/bootx64.efi
 KERN_BIN    := $(BUILD_KERN)/kernel_payload.bin
 KERN_BLOB   := $(INC)/kernel_payload_blob.h
@@ -119,7 +101,7 @@ USB_IMG     := $(BUILD_USB)/phantom_usb.img
 all: dirs cheatdll payload efi
 	@echo ""
 	@echo "══════════════════════════════════════════════"
-	@echo "  PHANTOM build complete"
+	@echo "  PHANTOM build complete (mingw-direct PE)"
 	@echo "  EFI bootkit:  $(EFI_BIN)"
 	@echo "  Cheat DLL:    $(CHEAT_DLL) (embedded)"
 	@echo "  Kernel:       $(KERN_BIN) (embedded)"
@@ -144,7 +126,7 @@ $(CHEAT_DLL): | dirs
 
 $(CHEAT_BLOB): $(CHEAT_DLL)
 	@echo "[*] Converting cheat DLL to embedded blob..."
-	@python3 -c "data=open('$(CHEAT_DLL)','rb').read();f=open('$(CHEAT_BLOB)','w');f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n#define _CHEAT_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gCheatPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%02x'%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Cheat blob: %d bytes embedded'%len(data))"
+	@python3 -c "data=open('$(CHEAT_DLL)','rb').read();f=open('$(CHEAT_BLOB)','w');f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n#define _CHEAT_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gCheatPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%%02x'%%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Cheat blob: %%d bytes embedded'%%len(data))"
 
 # ─── kernel payload (depends on cheat blob) ───
 payload: dirs cheatdll $(KERN_BIN)
@@ -163,22 +145,21 @@ $(BUILD_KERN)/kernel_payload.elf: $(KERN_OBJS)
 $(KERN_BIN): $(BUILD_KERN)/kernel_payload.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@echo "[*] Generating payload blob header..."
-	@python3 -c "data=open('$(KERN_BIN)','rb').read();f=open('$(KERN_BLOB)','w');f.write('#ifndef _KERNEL_PAYLOAD_BLOB_H_\n#define _KERNEL_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gKernelPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%02x'%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Payload blob: %d bytes'%len(data))"
+	@python3 -c "data=open('$(KERN_BIN)','rb').read();f=open('$(KERN_BLOB)','w');f.write('#ifndef _KERNEL_PAYLOAD_BLOB_H_\n#define _KERNEL_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gKernelPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%%02x'%%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Payload blob: %%d bytes'%%len(data))"
 
-# ─── EFI bootkit (depends on kernel payload blob) ───
+# ─── EFI bootkit (mingw-direct PE32+, no gnu-efi) ───
 efi: dirs payload $(EFI_BIN)
 	@echo "[+] EFI bootkit built: $(EFI_BIN)"
 
 $(BUILD_EFI)/%.o: $(SRC_EFI)/%.c $(KERN_BLOB)
-	$(CC) $(CFLAGS_EFI) -c $< -o $@
+	$(MINGW_CC) $(CFLAGS_EFI) -c $< -o $@
 
-$(EFI_SO): $(EFI_OBJS)
-	$(LD) $(LDFLAGS_EFI) $(EFI_OBJS) -o $@ $(LIBS_EFI)
-
-$(EFI_BIN): $(EFI_SO)
-	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic \
-		-j .dynsym -j .rel -j .rela -j .reloc \
-		--input-target=elf64-x86-64 --output-target=efi-app-x86_64 $< $@
+$(EFI_BIN): $(EFI_OBJS)
+	$(MINGW_CC) -nostdlib -e efi_main \
+		-Wl,--subsystem,10 \
+		-Wl,--dynamicbase \
+		-Wl,--nxcompat \
+		-o $@ $(EFI_OBJS)
 
 # ─── USB image creation ───
 usb: all
@@ -199,7 +180,7 @@ clean:
 
 # ─── help ───
 help:
-	@echo "PHANTOM EFI Bootkit — Build Targets"
+	@echo "PHANTOM EFI Bootkit — Build Targets (mingw-direct PE)"
 	@echo ""
 	@echo "  make all       — Full build: cheat DLL → kernel → EFI"
 	@echo "  make cheatdll  — Build cheat DLL + generate blob header"
@@ -215,5 +196,4 @@ help:
 	@echo "        Nothing touches disk. Forensically invisible."
 	@echo ""
 	@echo "Prerequisites:"
-	@echo "  apt install gnu-efi gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64"
-	@echo "              mtools python3"
+	@echo "  apt install gcc-mingw-w64-x86-64 mtools python3"
