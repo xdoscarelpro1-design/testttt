@@ -178,7 +178,7 @@ $(EFI_SO): $(EFI_OBJS)
 $(EFI_BIN): $(EFI_SO)
 	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic \
 		-j .dynsym -j .rel -j .rela -j .reloc \
-		--target=efi-app-x86_64 $< $@
+		--input-target=elf64-x86-64 --output-target=efi-app-x86_64 $< $@
 
 # ─── USB image creation ───
 usb: all
