@@ -132,15 +132,4 @@ namespace Custom {
         return CustomSlider::Int(label, v, v_min, v_max, format);
     }
 
-    namespace Slider {
-        bool Float(const char* label, float* v, float v_min, float v_max, const char* format)
-        {
-            return CustomSlider::Float(label, v, v_min, v_max, format);
-        }
-
-        bool Int(const char* label, int* v, int v_min, int v_max, const char* format)
-        {
-            return CustomSlider::Int(label, v, v_min, v_max, format);
-        }
-    }
 }
