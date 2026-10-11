@@ -9,8 +9,14 @@
 
 #include <stdint.h>
 
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
 typedef int32_t     NTSTATUS;
 typedef uint64_t    ULONG_PTR;
+typedef uint64_t    ULONG64;
+typedef uint64_t    UINTN;
 typedef uint32_t    ULONG;
 typedef uint16_t    USHORT;
 typedef uint8_t     UCHAR;
