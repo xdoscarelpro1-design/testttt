@@ -10,9 +10,9 @@
 #include <Cheat/Options.hpp>
 #include <Cheat/Cheat.hpp>
 #include <Cheat/Features/Misc/Bypass.hpp>
-#include "Cheat/FivemSDK/Fivem.hpp"
-#include "FrameWork/Dependencies/ImGui/custom.hpp"
-#include "FrameWork/Dependencies/ImGui/slider.hpp"
+#include <Cheat/FivemSDK/Fivem.hpp>
+#include <FrameWork/Dependencies/ImGui/custom.hpp>
+#include <FrameWork/Dependencies/ImGui/slider.hpp>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 

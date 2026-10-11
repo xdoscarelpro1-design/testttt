@@ -127,7 +127,8 @@ set SRCS=%SRCS% %SRC_CHEAT%\FrameWork\Dependencies\ImGui\custom.cpp
 set SRCS=%SRCS% %SRC_CHEAT%\FrameWork\Dependencies\ImGui\slider.cpp
 
 :: Compiler flags
-set CFLAGS=/O2 /std:c++17 /EHsc /DUNICODE /D_UNICODE /DWIN32 /D_WINDOWS
+set CFLAGS=/O2 /std:c++17 /EHa /DUNICODE /D_UNICODE /DWIN32 /D_WINDOWS
+set CFLAGS=%CFLAGS% /DIMGUI_DEFINE_MATH_OPERATORS /wd4005
 set CFLAGS=%CFLAGS% /I%INC% /I%SRC_CHEAT% /I%DXSDK_INC%
 
 :: Linker flags

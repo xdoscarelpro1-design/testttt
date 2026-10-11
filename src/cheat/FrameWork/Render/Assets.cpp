@@ -32,6 +32,8 @@ namespace FrameWork
 		FontAwesomeSolid18 = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(FontAwesomeSolid_compressed_data, FontAwesomeSolid_compressed_size, 18.f * (2.0f / 3.0f), &FontAwesomeConfig, &IconRanges[0]);
 		FontAwesomeSolidBig = io.Fonts->AddFontFromMemoryCompressedTTF(FontAwesomeSolid_compressed_data, FontAwesomeSolid_compressed_size, 30.f * (2.0f / 3.0f), &FontAwesomeConfig, &IconRanges[0]);
 
+		Poppins = InterRegular;
+
 		D3DX11CreateShaderResourceViewFromMemory(Device, LogoRawBytes, sizeof(LogoRawBytes), NULL, NULL, &Logo, NULL);
 	}
 }

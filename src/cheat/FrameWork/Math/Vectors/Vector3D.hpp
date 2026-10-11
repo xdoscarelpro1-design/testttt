@@ -76,6 +76,11 @@ public:
         *this = Normalized();
     }
 
+    void Normalize()
+    {
+        *this = Normalized();
+    }
+
     bool IsValid() const
     {
         return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);

@@ -3,8 +3,8 @@
 #include <map>
 #include "color.h"
 #include <random>
-#include "FrameWork\Render\Assets.hpp"
-#include "FrameWork\Render\Assets\FontAwesome.hpp"
+#include <FrameWork/Render/Assets.hpp>
+#include <FrameWork/Render/Assets/FontAwesome.hpp>
 // Set by Interface from g_Options.Theme
 int g_CheckboxStyle = 0;
 float g_AccentColor[4] = { 0.29f, 0.53f, 0.86f, 1.f };

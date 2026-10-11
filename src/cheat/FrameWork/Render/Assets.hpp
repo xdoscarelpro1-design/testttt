@@ -30,6 +30,8 @@ namespace FrameWork
 		inline ImFont* InterExtraBold = nullptr;
 		inline ImFont* InterBlack = nullptr;
 
+		inline ImFont* Poppins = nullptr;
+
 		inline ID3D11ShaderResourceView* Logo;
 
 		void Initialize(ID3D11Device* Device);
