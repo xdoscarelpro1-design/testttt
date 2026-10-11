@@ -71,7 +71,7 @@ namespace FrameWork
 	{
 		sTargetPid = TargetPid;
 
-		hTargetWindow = Memory::GetWindowHandleByPID(TargetPid);
+		hTargetWindow = (TargetPid == 0) ? Memory::GetGameWindow() : Memory::GetGameWindow();
 		if (hTargetWindow)
 		{
 			// Get Target Window Size
@@ -182,7 +182,7 @@ namespace FrameWork
 
 	void Overlay::SetTarget(DWORD TargetPid)
 	{
-		HWND newTarget = Memory::GetWindowHandleByPID(TargetPid);
+		HWND newTarget = Memory::GetGameWindow();
 		if (newTarget)
 		{
 			hTargetWindow = newTarget;

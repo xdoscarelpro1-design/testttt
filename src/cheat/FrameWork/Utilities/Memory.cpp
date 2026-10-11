@@ -1,27 +1,23 @@
 #include "Memory.hpp"
-#include "../../PhantomComm.hpp"
-#include <TlHelp32.h>
-#include <algorithm>
-#include <string>
+#include <Psapi.h>
 
 namespace FrameWork
 {
     namespace Memory
     {
-        static DWORD  s_Pid = 0;
-        static HANDLE s_Handle = NULL;
-
-        HWND GetWindowHandleByPID(int Pid)
+        HWND GetGameWindow()
         {
+            HWND hw = FindWindowA("grcWindow", NULL);
+            if (hw) return hw;
+
             struct FindData { DWORD pid; HWND result; };
-            FindData data = { (DWORD)Pid, NULL };
+            FindData data = { GetCurrentProcessId(), NULL };
 
             EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
-                FindData* fd = (FindData*)lParam;
+                FindData *fd = (FindData *)lParam;
                 DWORD winPid = 0;
                 GetWindowThreadProcessId(hwnd, &winPid);
-                if (winPid == fd->pid && IsWindowVisible(hwnd))
-                {
+                if (winPid == fd->pid && IsWindowVisible(hwnd)) {
                     fd->result = hwnd;
                     return FALSE;
                 }
@@ -31,156 +27,75 @@ namespace FrameWork
             return data.result;
         }
 
-        HWND GetWindowHandleByName(std::wstring WindowName)
+        uint64_t GetModuleBase()
         {
-            return FindWindowW(NULL, WindowName.c_str());
+            return (uint64_t)GetModuleHandleW(NULL);
         }
 
-        DWORD GetProcessPidByName(std::wstring ProcessName)
+        uint64_t GetModuleBase(const wchar_t *ModuleName)
         {
-            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snap == INVALID_HANDLE_VALUE) return 0;
+            return (uint64_t)GetModuleHandleW(ModuleName);
+        }
 
-            PROCESSENTRY32W pe = { sizeof(pe) };
-            DWORD pid = 0;
+        uint64_t GetModuleSize(const wchar_t *ModuleName)
+        {
+            HMODULE hMod = ModuleName ? GetModuleHandleW(ModuleName) : GetModuleHandleW(NULL);
+            if (!hMod) return 0;
 
-            std::wstring targetLower = ProcessName;
-            std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::towlower);
+            MODULEINFO mi = {};
+            if (GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi)))
+                return mi.SizeOfImage;
 
-            if (Process32FirstW(snap, &pe))
-            {
-                do
-                {
-                    std::wstring current(pe.szExeFile);
-                    std::transform(current.begin(), current.end(), current.begin(), ::towlower);
-                    if (current == targetLower)
-                    {
-                        pid = pe.th32ProcessID;
-                        break;
+            auto dos = (IMAGE_DOS_HEADER *)hMod;
+            if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+            auto nt = (IMAGE_NT_HEADERS *)((uint8_t *)hMod + dos->e_lfanew);
+            if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+            return nt->OptionalHeader.SizeOfImage;
+        }
+
+        int DetectBuildNumber()
+        {
+            wchar_t path[MAX_PATH] = {};
+            GetModuleFileNameW(NULL, path, MAX_PATH);
+
+            std::wstring name(path);
+            size_t slash = name.find_last_of(L"\\/");
+            if (slash != std::wstring::npos)
+                name = name.substr(slash + 1);
+
+            /* FiveM executables: FiveM_b2802_GTAProcess.exe, fivem_b3095.exe, etc. */
+            std::wstring lower = name;
+            for (auto &c : lower) c = towlower(c);
+
+            size_t bpos = lower.find(L"b");
+            while (bpos != std::wstring::npos) {
+                if (bpos + 1 < lower.size() && lower[bpos + 1] >= L'0' && lower[bpos + 1] <= L'9') {
+                    std::wstring digits;
+                    for (size_t i = bpos + 1; i < lower.size() && lower[i] >= L'0' && lower[i] <= L'9'; i++)
+                        digits += lower[i];
+                    if (!digits.empty()) {
+                        int build = _wtoi(digits.c_str());
+                        if (build >= 1000) return build;
                     }
-                } while (Process32NextW(snap, &pe));
+                }
+                bpos = lower.find(L"b", bpos + 1);
             }
-            CloseHandle(snap);
-            return pid;
-        }
-
-        DWORD FindFiveMProcess(int& buildNumber, std::wstring& processName)
-        {
-            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snap == INVALID_HANDLE_VALUE) return 0;
-
-            PROCESSENTRY32W pe = { sizeof(pe) };
-            DWORD resultPid = 0;
-
-            if (Process32FirstW(snap, &pe))
-            {
-                do
-                {
-                    std::wstring name(pe.szExeFile);
-                    std::wstring nameLower = name;
-                    std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::towlower);
-
-                    if (nameLower.find(L"fivem") != std::wstring::npos ||
-                        nameLower.find(L"gta5") != std::wstring::npos ||
-                        nameLower.find(L"fxserver") != std::wstring::npos)
-                    {
-                        if (nameLower.find(L"b") != std::wstring::npos)
-                        {
-                            size_t pos = nameLower.find(L"b");
-                            if (pos != std::wstring::npos && pos + 1 < nameLower.size())
-                            {
-                                std::wstring buildStr;
-                                for (size_t i = pos + 1; i < nameLower.size(); i++)
-                                {
-                                    if (nameLower[i] >= L'0' && nameLower[i] <= L'9')
-                                        buildStr += nameLower[i];
-                                    else
-                                        break;
-                                }
-                                if (!buildStr.empty())
-                                    buildNumber = _wtoi(buildStr.c_str());
-                            }
-                        }
-
-                        processName = name;
-                        resultPid = pe.th32ProcessID;
-                        break;
-                    }
-                } while (Process32NextW(snap, &pe));
-            }
-            CloseHandle(snap);
-            return resultPid;
-        }
-
-        bool IsProcessRunning(DWORD Pid)
-        {
-            HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, Pid);
-            if (!proc) return false;
-
-            DWORD exitCode = 0;
-            GetExitCodeProcess(proc, &exitCode);
-            CloseHandle(proc);
-            return exitCode == STILL_ACTIVE;
-        }
-
-        uint64_t GetModuleBaseByName(DWORD Pid, std::wstring ModuleName)
-        {
-            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, Pid);
-            if (snap == INVALID_HANDLE_VALUE) return 0;
-
-            MODULEENTRY32W me = { sizeof(me) };
-            uint64_t base = 0;
-
-            std::wstring targetLower = ModuleName;
-            std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::towlower);
-
-            if (Module32FirstW(snap, &me))
-            {
-                do
-                {
-                    std::wstring current(me.szModule);
-                    std::transform(current.begin(), current.end(), current.begin(), ::towlower);
-                    if (current == targetLower)
-                    {
-                        base = (uint64_t)me.modBaseAddr;
-                        break;
-                    }
-                } while (Module32NextW(snap, &me));
-            }
-            CloseHandle(snap);
-            return base;
-        }
-
-        void AttachProces(DWORD Pid)
-        {
-            s_Pid = Pid;
-            s_Handle = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE |
-                                   PROCESS_QUERY_INFORMATION, FALSE, Pid);
-        }
-
-        void DetachProcess()
-        {
-            if (s_Handle)
-            {
-                CloseHandle(s_Handle);
-                s_Handle = NULL;
-            }
-            s_Pid = 0;
+            return 0;
         }
 
         uint64_t AllocateMemory(SIZE_T Size)
         {
-            if (!s_Handle) return 0;
-            LPVOID mem = VirtualAllocEx(s_Handle, NULL, Size,
-                                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            LPVOID mem = VirtualAlloc(NULL, Size,
+                                      MEM_COMMIT | MEM_RESERVE,
+                                      PAGE_EXECUTE_READWRITE);
             return (uint64_t)mem;
         }
 
         uint64_t AllocateMemoryNear(uint64_t NearAddress, SIZE_T Size)
         {
-            if (!s_Handle) return 0;
-
-            uintptr_t minAddr = (NearAddress > 0x70000000) ? (NearAddress - 0x70000000) : 0x10000;
+            uintptr_t minAddr = (NearAddress > 0x70000000)
+                                    ? (NearAddress - 0x70000000)
+                                    : 0x10000;
             uintptr_t maxAddr = NearAddress + 0x70000000;
 
             MEMORY_BASIC_INFORMATION mbi = {};
@@ -188,59 +103,63 @@ namespace FrameWork
 
             while (addr < maxAddr)
             {
-                if (VirtualQueryEx(s_Handle, (LPCVOID)addr, &mbi, sizeof(mbi)) == 0)
+                if (VirtualQuery((LPCVOID)addr, &mbi, sizeof(mbi)) == 0)
                     break;
 
-                if (mbi.State == MEM_FREE && mbi.RegionSize >= Size)
-                {
-                    LPVOID mem = VirtualAllocEx(s_Handle, (LPVOID)addr, Size,
-                                               MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+                if (mbi.State == MEM_FREE && mbi.RegionSize >= Size) {
+                    LPVOID mem = VirtualAlloc((LPVOID)addr, Size,
+                                              MEM_COMMIT | MEM_RESERVE,
+                                              PAGE_EXECUTE_READWRITE);
                     if (mem)
                         return (uint64_t)mem;
                 }
-
                 addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
             }
 
             return AllocateMemory(Size);
         }
 
-        void FreeProcessMemory(uint64_t Address, SIZE_T Size)
+        void FreeProcessMemory(uint64_t Address, SIZE_T)
         {
-            if (!s_Handle) return;
-            VirtualFreeEx(s_Handle, (LPVOID)Address, 0, MEM_RELEASE);
+            VirtualFree((LPVOID)Address, 0, MEM_RELEASE);
         }
 
-        void ReadProcessMemoryImpl(uint64_t ReadAddress, LPVOID Read, SIZE_T Size)
+        uint64_t CreateCodeCave(size_t Size)
         {
-            if (PhantomComm::IsConnected() && s_Pid)
-            {
-                PhantomComm::ReadMemory(s_Pid, (void*)ReadAddress, Read, Size);
-                return;
+            return AllocateMemory(Size);
+        }
+
+        bool FreeCave(uintptr_t Addr)
+        {
+            return VirtualFree((LPVOID)Addr, 0, MEM_RELEASE) != 0;
+        }
+
+        std::vector<uint8_t> ReadBytes(uintptr_t Addr, size_t Size)
+        {
+            std::vector<uint8_t> result(Size, 0);
+            __try {
+                memcpy(result.data(), (const void *)Addr, Size);
             }
-
-            if (s_Handle)
-                ReadProcessMemory(s_Handle, (LPCVOID)ReadAddress, Read, Size, NULL);
-        }
-
-        bool WriteProcessMemoryImpl(uint64_t WriteAddress, LPVOID Write, SIZE_T Size)
-        {
-            if (PhantomComm::IsConnected() && s_Pid)
-                return PhantomComm::WriteMemory(s_Pid, (void*)WriteAddress, Write, Size);
-
-            if (!s_Handle) return false;
-            SIZE_T written = 0;
-            return WriteProcessMemory(s_Handle, (LPVOID)WriteAddress, Write, Size, &written) != 0;
-        }
-
-        std::string ReadProcessMemoryString(uint64_t ReadAddress, SIZE_T StringSize)
-        {
-            std::string result(StringSize, '\0');
-            ReadProcessMemoryImpl(ReadAddress, &result[0], StringSize);
-            size_t null_pos = result.find('\0');
-            if (null_pos != std::string::npos)
-                result.resize(null_pos);
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                result.clear();
+            }
             return result;
+        }
+
+        bool WriteBytes(uintptr_t Addr, const std::vector<uint8_t> &Bytes)
+        {
+            return WriteProcessMemoryImpl(Addr, (LPVOID)Bytes.data(), Bytes.size());
+        }
+
+        bool HookJump(uintptr_t HookAddress, uintptr_t JmpToAddress)
+        {
+            /* FF 25 00 00 00 00 [8-byte absolute address] — 14-byte jmp */
+            uint8_t patch[14];
+            patch[0] = 0xFF;
+            patch[1] = 0x25;
+            patch[2] = patch[3] = patch[4] = patch[5] = 0x00;
+            memcpy(patch + 6, &JmpToAddress, 8);
+            return WriteBytes(HookAddress, std::vector<uint8_t>(patch, patch + 14));
         }
     }
 }

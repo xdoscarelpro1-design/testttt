@@ -1,199 +1,274 @@
 #pragma once
 #include <Windows.h>
 
+/*
+ * PHANTOM Options — merged from Traceless Variables.hpp
+ *
+ * Flat structs serialized as a binary blob by the config system.
+ * Every field must have a default so a fresh g_Options is sane.
+ */
+
+enum class NoClipState
+{
+    Disabled,
+    Hold,
+    Toggle
+};
+
 namespace Cheat
 {
-	class Options
-	{
-	public:
-		struct LegitBot
-		{
-			struct AimBot
-			{
-				bool Enabled;
-				int KeyBind = 0;
-				int KeyMode = 0; // 0 = Hold, 1 = Toggle
-				bool TargetNPC;
-				bool VisibleCheck;
-				int HitBox = 0;
-				int MaxDistance = 600;
-				int FOV = 90;
-				int SmoothHorizontal = 80;
-				int SmoothVertical = 80;
-				// Lead moving targets by their velocity * bullet flight time.
-				// Off = track the chosen bone directly with no lead at all.
-				bool EnablePrediction = false;
-			}AimBot;
-			struct TriggerBot
-			{
-				bool Enabled;
-				int KeyBind = 0;
-				int KeyMode = 0; // 0 = Hold, 1 = Toggle
-				bool ShotNPC;
-				int FOV = 90;
-				bool VisibleCheck;
-				int MaxDistance = 250;
-				int ReactionTime;
-				// Extra delay randomization on top of ReactionTime, in ms.
-				int ReactionJitter = 30;
-				// Percent chance to actually fire once a target is acquired.
-				int HitChance = 100;
-				// Minimum gap between shots so it can't machine-gun a click.
-				int RefireDelay = 90;
-				// Only fire when the game itself says we're aiming.
-				bool RequireAiming = true;
-			}Trigger;
-			struct SilentAim
-			{
-				bool Enabled;
-				int Fov = 30;
-				int KeyBind = 0;
-				int KeyMode = 0; // 0 = Hold, 1 = Toggle
-				bool ShotNPC;
-				bool VisibleCheck;
-				bool MagicBullet;
-				int MaxDistance = 600;
-				int HitBox;
-			}SilentAim;
-		}LegitBot;
-		struct Visuals
-		{
-			struct ESP
-			{
-				struct Players
-				{
-					int KeyBind = 0;
-					bool Enabled = true;
-					bool ShowLocalPlayer = false;
-					bool ShowNPCs;
-					bool VisibleOnly = false;
-					int RenderDistance = 500;
-					bool FilledBox = false;
-					float FilledBoxColor[4] = { 0.f, 1.f, 0.f, 0.33f };
-					bool Box = false;
-					float BoxColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool Skeleton = false;
-					bool Head = false;
-					float HeadSize = 3.f;
-					float HeadColor[4] = { 0.f, 1.f, 0.f, 0.f };
-					float SkeletonColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool Name = true;
-					float NameColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool HealthBar = true;
-					float HealthBarColor[4] = {0.f, 1.f, 0.f, 1.f};
-					bool ArmorBar;
-					float ArmorBarColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool WeaponName;
-					float WeaponNameColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool Distance;
-					float DistanceColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool SnapLines;
-					float SnaplinesColor[4] = { 0.f, 1.f, 0.f, 1.f };
-					bool Weapon_Misc = true;
-				}Players;
+    struct AimBot_s
+    {
+        bool Enabled = false;
+        bool ShowFov = false;
+        bool TargetNPC = false;
+        bool VisibleCheck = true;
+        bool EnablePrediction = false;
 
-				struct Vehicles
-				{
-					bool Enabled;
-					bool IgnoreOccupiedVehicles;
-					bool Marker;
-					bool Distance;
-					bool Name;
-					float Color[4] = { 0.f, 1.f, 0.f, 1.f };
-				}Vehicles;
+        int ClosestFov = 0;
+        int KeyBind = 0;
+        int KeyBindState = 0;   // 0 Hold, 1 Toggle
+        int MaxDistance = 250;
+        int FOV = 100;
+        int SmoothHorizontal = 0;
+        int SmoothVertical = 0;
+        int AimbotStyle = 0;    // 0 Custom, 1 Exponential, 2 Linear, 3 Humanized, 4 Snap
+        bool HitBoxes[8] = { true, false, false, false, false, false, false, false };
+        bool ShowHitboxPreview = false;
+        bool ShowAimbotPreview = false;
+        bool TargetCombatRoll = false;
+        float AimbotPreviewColor[4] = { 0.f, 1.f, 0.f, 1.f };
+        float FovColor[4] = { 1.f, 1.f, 1.f, 1.f };
+    };
 
-				struct Radar
-				{
-					bool Enabled = false;
-					float Size = 150.f;
-					float Range = 200.f;
-					float PosX = 20.f;
-					float PosY = 20.f;
-					float Opacity = 0.85f;
-				}Radar;
-			}ESP;
-		}Visuals;
-		struct Misc
-		{
-			struct Screen
-			{
-				bool ShowTriggerFov;
-				float TriggerFovColor[4] = {1.f, 1.f, 1.f, 1.f};
-				bool ShowAimbotFov;
-				float AimbotFovColor[4] = { 1.f, 1.f, 1.f, 1.f };
-				bool ShowSilentAimFov;
-				float SilentFovColor[4] = { 1.f, 1.f, 1.f, 1.f };
-				float PartColor[4] = { 0.27f, 0.50f, 0.70f, 1.f };
-			}Screen;
-			struct Exploits
-			{
-				struct LocalPlayer
-				{
-					bool Noclip;
-					int NoclipBind;
-					int NoclipKeyMode = 0; // 0 = Hold, 1 = Toggle
-					int NoclipSpeed;
-					bool shrink;
-					bool norecoil;
-					bool speed;
-					float Player_speed = 1.0f;
-					bool nospread;
-					bool noreload;
-					int godbind = 0;
-					int tpbind = 0;
-					int unlockbind = 0;
+    struct SilentAim_s
+    {
+        bool Enabled = false;
+        bool ShowFOV = false;
+        bool ShotNPC = false;
+        bool VisibleCheck = true;
+        bool MagicBullet = false;
+        bool Humanize = false;
 
-					int health_ammount;
-					bool Start_Health;
-					bool God;
-					int KeyBind = 0;
-					bool VehicleSpeed;
-					float VehicleSpeedMultiplier = 1.5f;
-					int VehicleSpeedBind = 0;
-					bool SafeTP = true;
-					bool VehicleGod = false;
-					bool SuperPunch = false;
-					float SuperPunchForce = 50.f;
-					bool Invisible = false;
-					bool Desync = false;
-					int DesyncKeyBind = 0;
-				}LocalPlayer;
-			}Exploits;
-			float FriendColor[4] = { 0.f, 0.f, 1.f, 1.f };
-		}Misc;
-		struct Theme
-		{
-			float AccentColor[4] = { 0.29f, 0.53f, 0.86f, 1.f }; // blue
-			float BgColor[4] = { 0.106f, 0.106f, 0.106f, 1.f };  // dark gray
-			float ChildBgColor[4] = { 0.078f, 0.078f, 0.078f, 0.95f };
-			float TextColor[4] = { 1.f, 1.f, 1.f, 1.f };
-			float BorderColor[4] = { 0.078f, 0.078f, 0.078f, 1.f };
-			float WindowRounding = 10.f;
-			float ChildRounding = 8.f;
-			float ButtonRounding = 6.f;
-			float FrameRounding = 4.f;
-			float WindowOpacity = 1.f;
-			int WindowWidth = 700;
-			int WindowHeight = 500;
-			int TabLayout = 0; // 0 = vertical (left), 1 = horizontal (top)
-			float TabWidth = 80.f;
-			int CheckboxStyle = 0; // 0 = default checkbox, 1 = toggle switch
+        int Fov = 100;
+        int KeyBind = 0;
+        int KeyBindState = 0;
+        int MissChance = 0;
+        int ClosestFov = 0;
+        int MaxDistance = 250;
+        bool HitBoxes[8] = { true, false, false, false, false, false, false, false };
+        bool ShowHitboxPreview = false;
+        float FovColor[4] = { 1.f, 1.f, 1.f, 1.f };
+    };
 
-		}Theme;
-		struct General
-		{
-			bool ShutDown = false;
-			bool MenuOpen = true;
-			int PanicKey = 0;
-			int MenuKey = VK_RSHIFT;
-			bool CaptureBypass = false;
-			int ThreadDelay = 0;
-			// Include downed/dead peds in the entity list. Off by default —
-			// on most servers a "dead" player is still a valid ped and would
-			// otherwise soak up your aim.
-			bool IncludeDeathPlayers = false;
-		}General;
-	};
+    struct TriggerBot_s
+    {
+        bool Enabled = false;
+        bool ShotNPC = false;
+        bool VisibleCheck = true;
+
+        int KeyBind = 0;
+        int KeyBindState = 0;
+        int MaxDistance = 250;
+        int ReactionTime = 0;
+    };
+
+    struct Players_s
+    {
+        bool Enabled = true;
+        bool Toogle = false;
+        bool ShowLocalPlayer = false;
+        bool ShowNPC = true;
+        bool VisibleCheck = true;
+        bool ExcludeDeads = false;
+        bool SpectatorList = false;
+
+        int HealthBarPos = 1;
+        int ArmorBarPos = 1;
+        int NamePos = 3;
+        int DistPos = 2;
+        int WeaponPos = 2;
+
+        int ToggleKey = 0;
+        int ToggleKeyState = 0;
+        int RenderDistance = 500;
+        int EspOptions = 6;
+        int BoxType = 1;
+
+        bool EnableBox = true;
+        bool EnableDistance = true;
+        bool EnableHeadBol = true;
+        bool Skeleton = true;
+        bool HealthBar = true;
+        bool ArmorBar = true;
+        bool WeaponName = true;
+        bool Name = true;
+        bool RadarEnabled = false;
+        bool CustomCrosshair = true;
+        bool EnableAimingWarning = true;
+        bool EnableObserverWarning = true;
+
+        bool RocketStyle = true;
+        float BoxColor[4] = { 0.f, 1.f, 0.f, 1.f };
+        float NormalBoxColor[4] = { 0.f, 1.f, 0.f, 1.f };
+        float InVisibleBoxColor[4] = { 1.f, 0.f, 0.f, 1.f };
+        float DistanceColor[4] = { 1.f, 1.f, 1.f, 1.f };
+        float SkeletonColor[4] = { 0.f, 1.f, 0.f, 1.f };
+        float NormalSkeletonColor[4] = { 1.f, 1.f, 1.f, 1.f };
+        float InvisibleSkeletonColor[4] = { 1.f, 0.5f, 0.5f, 1.f };
+        float FriendSkeletonColor[4] = { 0.f, 1.f, 1.f, 0.7f };
+        float HealthBarColor[4] = { 0.f, 1.f, 0.f, 0.7f };
+        float ArmorBarColor[4] = { 0.f, 0.f, 1.f, 0.7f };
+        float TextColor[4] = { 1.f, 1.f, 1.f, 1.f };
+        float NameColor[4] = { 1.f, 1.f, 1.f, 1.f };
+        float WeaponNameColor[4] = { 1.f, 1.f, 1.f, 1.f };
+        float HeadCircleColor[4] = { 0.8f, 0.8f, 0.8f, 0.12f };
+        float CrosshairColor[4] = { 0.65f, 0.35f, 1.f, 1.f };
+        float CrosshairDotColor[4] = { 1.f, 0.2f, 0.2f, 1.f };
+        bool ShowPreview = false;
+
+        float SnapLinesColor[4] = { 0.f, 1.f, 0.f, 1.f };
+        float FriendColor[4] = { 0.f, 0.f, 1.f, 1.f };
+    };
+
+    struct Vehicles_s
+    {
+        bool Enabled = true;
+        bool Toogle = false;
+        bool Distance = true;
+        bool Name = true;
+        bool ShowLockState = true;
+
+        int ToggleKey = 0;
+        int ToggleKeyState = 0;
+        int EspOptions = 0;
+
+        bool Marker = false;
+        float MarkerColor[4] = { 1.f, 1.f, 1.f, 0.7f };
+        float DistanceColor[4] = { 0.8f, 0.8f, 0.8f, 0.7f };
+        float NameColor[4] = { 1.f, 1.f, 1.f, 0.7f };
+    };
+
+    struct Self_s
+    {
+        bool Invisible = false;
+        bool GodMode = false;
+        bool NoClip = false;
+        bool NoRagDoll = false;
+        bool RemoveSpread = false;
+        bool RemoveRecoil = false;
+        bool SeatBelt = false;
+        bool StealVehicle = false;
+        bool UnLockAllVehicles = false;
+        bool LockAllVehicles = false;
+        bool ReplayTP = false;
+        bool AntHS = false;
+        bool Bubbles = false;
+        bool AntiBubbles = false;
+        bool Absorption = false;
+        int AbsorptionPercent = 0;
+        bool Start_Health = false;
+        int health_ammount = 0;
+        bool Immortality = false;
+        bool SuperPunch = false;
+        float SuperPunchForce = 50.f;
+        bool VehicleSpeed = false;
+        float VehicleSpeedMultiplier = 1.5f;
+        int VehicleSpeedBind = 0;
+        bool Desync = false;
+        int DesyncKeyBind = 0;
+
+        float WeaponSize = 1.f;
+        float NoClipSpeed = 100.f;
+
+        int NoClipKey = 0;
+        int NoClipKeyState = 0;
+        int GodKey = 0;
+        int GodKeyState = 0;
+        int ReplayTPBind = 0;
+        int ReplayTPBindState = 0;
+        int NoClipMode = 0;
+
+        float PeakPositionX = 0.f;
+        float PeakPositionY = 0.f;
+        float PeakPositionZ = 0.f;
+        bool PeakSet = false;
+        int CreatePeak = 0;
+        int ReturnToPeak = 0;
+        int CreatePeakBind = 0;
+        int ReturnToPeakBind = 0;
+
+        bool StrafeEnabled = false;
+        int StrafeKey = 0;
+        int StrafeKeyState = 0;
+        float StrafeSpeed = 0.5f;
+
+        int InvisibleKey = 0;
+        int InvisibleKeyState = 0;
+        int SeatbeltKey = 0;
+        int SeatbeltKeyState = 0;
+        int BubblesKey = 0;
+        int BubblesKeyState = 0;
+        int AntiBubblesKey = 0;
+        int AntiBubblesKeyState = 0;
+        int TeleportWaypointKey = 0;
+        int TeleportWaypointKeyState = 0;
+        int SuicideKey = 0;
+        int SuicideKeyState = 0;
+    };
+
+    class Options
+    {
+    public:
+        struct LegitBot_Config
+        {
+            AimBot_s AimBot;
+            SilentAim_s SilentAim;
+            TriggerBot_s Trigger;
+        } LegitBot;
+
+        struct Visuals_Config
+        {
+            Players_s Players;
+            Vehicles_s Vehicles;
+        } Visuals;
+
+        struct Exploits_Config
+        {
+            Self_s Self;
+        } Exploits;
+
+        struct General_Config
+        {
+            bool ShutDown = false;
+            bool CaptureBypass = false;
+            bool NvidiaBypass = false;
+            bool Vsync = false;
+            bool SecondMonitor = false;
+            bool ShowWatermark = true;
+            bool IncludeDeathPlayers = false;
+            int MenuKey = VK_INSERT;
+            int MenuKeyState = 0;
+            float AccentColor[4] = { 0.58f, 0.58f, 0.72f, 1.f };
+
+            int BackgroundStyle = 4;    // 0 None, 1 Scanlines, 2 Hex, 3 Particles, 4 Matrix
+            bool RainbowAccent = false;
+            float BorderSize = 0.0f;
+            float MenuScale = 1.0f;
+            int MenuStyle = 0;          // 0 Panel, 1 Flat, 2 Glass
+
+            bool ShowKeybinds = true;
+            bool Notifications = true;
+
+            float ColorBg[4]       = { 10/255.f, 10/255.f, 10/255.f, 1.f };
+            float ColorChildBg[4]  = { 16/255.f, 16/255.f, 16/255.f, 1.f };
+            float ColorBoxBg[4]    = { 14/255.f, 14/255.f, 14/255.f, 1.f };
+            float ColorOutline[4]  = { 70/255.f, 70/255.f, 70/255.f, 0.43f };
+            float ColorText[4]     = { 210/255.f, 210/255.f, 210/255.f, 1.f };
+            float ColorTextDim[4]  = { 110/255.f, 110/255.f, 130/255.f, 1.f };
+        } General;
+    };
 }
 
 inline Cheat::Options g_Options;
+inline char g_UISearchBuf[128] = {};

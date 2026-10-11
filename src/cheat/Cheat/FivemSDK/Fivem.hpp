@@ -3,174 +3,166 @@
 
 #include "Classes.hpp"
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 #include <FrameWork/FrameWork.hpp>
 
 namespace Cheat
 {
-	enum GAME_VERSION
-	{
-		GAME_VERSION_GAME_b2372,
-		GAME_VERSION_GTA_b2372,
-		GAME_VERSION_GAME_b2612,
-		GAME_VERSION_GTA_b2612,
-		GAME_VERSION_GAME_b2699,
-		GAME_VERSION_GTA_b2699,
-		GAME_VERSION_GAME_b2189,
-		GAME_VERSION_GTA_b2189,
-		GAME_VERSION_GAME_b2802,
-		GAME_VERSION_GTA_b2802,
-		GAME_VERSION_GAME_b2060,
-		GAME_VERSION_GTA_b2060,
-		GAME_VERSION_GAME_b2545,
-		GAME_VERSION_GTA_b2545,
-		GAME_VERSION_GAME_b2944,
-		GAME_VERSION_GTA_b2944,
-		GAME_VERSION_GAME_b3095,
-		GAME_VERSION_GTA_b3095,
-	};
+    struct LocalPEDInfo
+    {
+        CPed* Ped;
+        int iIndex;
+        ImVec2 ScreenPos;
+        Vector3D WorldPos;
+    };
 
-	struct PedStaticInfo
-	{
-		CPed* Ped;
-		int iIndex;
-		int NetId;
-		bool bIsLocalPlayer;
-		bool bIsNPC;
-		std::string Name;
-		uint64_t crSkeletonData;
-		bool IsFriend = false;
+    struct VehicleInfo
+    {
+        CVehicle* Vehicle;
+        std::string Name;
+        uint64_t ModelInfo;
+        int iIndex = -1;
+    };
 
-		std::unordered_map<unsigned int, unsigned> MaskToBoneId;
-	};
+    struct PedStaticInfo
+    {
+        CPed* Ped;
+        uint64_t crSkeletonData;
+        std::unordered_map<unsigned int, unsigned> MaskToBoneId;
+        std::string Name;
 
-	struct Entity
-	{
-		PedStaticInfo StaticInfo;
+        int NetId;
+        int iIndex;
 
-		Vector3D Cordinates;
-		bool Visible;
-		ImVec2 HeadPos;
-	};
+        bool IsFriend = false;
+        bool bIsLocalPlayer;
+        bool bIsNPC;
+        bool VisibleCheck;
+        bool IsLookingAtYou;
+    };
 
-	struct LocalPEDInfo
-	{
-		CPed* Ped;
-		int iIndex;
-		ImVec2 ScreenPos;
-		Vector3D WorldPos;
-	};
+    struct Entity
+    {
+        PedStaticInfo StaticInfo;
+        Vector3D Cordinates;
+        bool Visible;
+        ImVec2 HeadPos;
+    };
 
-	struct VehicleInfo
-	{
-		CVehicle* Vehicle;
-		std::string Name;
-		uint64_t ModelInfo;
-		int iIndex = -1;
-	};
+    class FivemSDK
+    {
+    public:
+        void Intialize();
+        bool UpdateEntities();
+        bool UpdateVehicles();
 
-	class FivemSDK
-	{
-	public:
-		void Intialize();
-		bool UpdateEntities();
-		bool UpdateVehicles();
+        uint64_t GetModuleBase() { return ModuleBase; };
 
-		DWORD GetPid() { return Pid; }
-		uint64_t GetModuleBase() { return ModuleBase; };
-		LocalPEDInfo GetLocalPlayerInfo() { return LocalPlayerInfo; }
-		std::vector<Entity> GetEntitiyList() { return EntityList; }
-		std::vector<VehicleInfo> GetVehicleList() { return VehicleList; }
-		uint64_t GetHandleBulletAddress() { return HandleBullet; }
-		uint64_t GetBlipListAddress() { return BlipList; }
-		CCamGameplayDirector* GetCamGameplayDirector() { return pCamGameplayDirector; }
+        LocalPEDInfo GetLocalPlayerInfo() { return LocalPlayerInfo; }
+        CCamGameplayDirector* GetCamGameplayDirector() { return pCamGameplayDirector; }
+        std::vector<Entity> GetEntitiyList() { return EntityList; }
+        std::vector<VehicleInfo> GetVehicleList() { return VehicleList; }
+        uint64_t GetHandleBulletAddress() { return HandleBullet; }
+        uint64_t GetBlipListAddress() { return BlipList; }
 
-		CPed* GetAimingEntity();
-		bool IsPlayerAiming();
+        uint64_t GetInvisibleAddress() { return Invisible; }
+        uint64_t GetCanCombatRollAddress() { return CanCombatRoll; }
+        uint64_t GetGameplayCamHolderAddress() { return GameplayCamHolder; }
+        uint64_t GetGameplayCamTargetAddress() { return GameplayCamTarget; }
 
-		Vector3D GetBonePosVec3(Entity Ped, unsigned int Mask);
-		bool GetPedBoneIndex(Entity Ped, unsigned int Mask, unsigned int& newIdx);
+        CPed* GetAimingEntity();
+        bool IsPlayerAiming();
 
-		ImVec2 GetClosestHitBox(Entity Ped);
-		bool FindClosestEntity(float Fov, int MaxDistance, bool NPC, Entity* Output);
+        Vector3D GetBonePosVec3(Entity Ped, unsigned int Mask);
+        bool GetPedBoneIndex(Entity Ped, unsigned int Mask, unsigned int& newIdx);
 
-		void ProcessCameraMovement(Vector3D WorldPosition, int SmoothHorizontal, int SmoothVertical);
-		void TeleportObject(uintptr_t Object, uintptr_t Navigation, uintptr_t ModelInfo, Vector3D Position, Vector3D VisualPosition, bool Stop);
+        ImVec2 GetClosestHitBox(Entity Ped);
+        bool FindClosestEntity(float Fov, int MaxDistance, bool VisibleCheck, bool NPC, int PriorityMode, Entity* Output);
 
-		ImVec2 WorldToScreen(Vector3D Pos);
-		bool IsOnScreen(ImVec2 Pos);
+        void ProcessCameraMovement(Vector3D WorldPosition, int SmoothHorizontal, int SmoothVertical);
+        void TeleportToObject(uintptr_t Object, uintptr_t Navigation, uintptr_t ModelInfo, Vector3D Position, Vector3D VisualPosition, bool Stop);
 
-		void UpdateNamesThread();
+        void network_request_control_of_entity(uint64_t entity, uint64_t localplayer);
+        uint8_t get_owner_id(uint64_t net_object);
+        bool set_network_id_can_migrate(uint64_t net_object, bool toggle);
+        bool set_network_id_exists_on_all_machines(uint64_t net_object, bool toggle);
+        bool network_request_control_of_network_id(uint64_t net_object, uint64_t local_net_object);
 
-		nlohmann::json GetServerInfo();
+        uint64_t SyncTreeGetter(std::string SyncTree);
+        std::string GetPlayerName(uint64_t PeerAddress, int GameNetId);
 
-		bool IsInitialized() { return bIsIntialized; }
+        ImVec2 WorldToScreen(Vector3D Pos);
+        bool IsOnScreen(ImVec2 Pos);
 
-		// Offset resolution status — lets the UI report exactly which feature
-		// has no valid pointer instead of the feature failing silently.
-		int  GetResolvedBuild()   { return ResolvedBuild; }
-		bool IsExactOffsetMatch() { return ExactOffsetMatch; }
-		bool IsWorldValid()        { return WorldValid; }
-		bool IsReplayValid()       { return ReplayValid; }
-		bool IsViewPortValid()     { return ViewPortValid; }
-		bool IsCameraValid()       { return CameraValid; }
-		bool IsHandleBulletValid() { return HandleBulletValid; }
-		bool IsBlipListValid()     { return BlipListValid; }
+        int GetGameVersion() { return RealGameVersion ? RealGameVersion : GameVersion; }
+        bool IsInitialized() { return bIsIntialized; }
 
-		std::unordered_map<CPed*, PedStaticInfo> AllEntitesList;
-		std::unordered_map<CPed*, PedStaticInfo> FriendList;
+        int  GetResolvedBuild()    { return ResolvedBuild; }
+        bool IsWorldValid()        { return WorldValid; }
+        bool IsReplayValid()       { return ReplayValid; }
+        bool IsViewPortValid()     { return ViewPortValid; }
+        bool IsCameraValid()       { return CameraValid; }
+        bool IsHandleBulletValid() { return HandleBulletValid; }
+        bool IsBlipListValid()     { return BlipListValid; }
 
-	private:
-		bool bIsIntialized = false;
+        std::unordered_map<CPed*, PedStaticInfo> AllEntitesList;
+        std::unordered_map<int, PedStaticInfo> FriendList;
 
-		int  ResolvedBuild = 0;
-		bool ExactOffsetMatch = false;
-		bool WorldValid = false;
-		bool ReplayValid = false;
-		bool ViewPortValid = false;
-		bool CameraValid = false;
-		bool HandleBulletValid = false;
-		bool BlipListValid = false;
-		bool AimingFlagValid = false;
+    public:
+        bool bIsIntialized = false;
 
-		uint64_t World; // 48 8B 05 ? ? ? ? 33 D2 48 8B 40 08 8A CA 48 85 C0 74 16 48 8B, ResolveInstructionLenght by 7
-		uint64_t ReplayInterface; // 48 8D 0D ?? ?? ?? ?? 48 ?? ?? E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 8A D8 E8 ?? ?? ?? ?? 84 DB 75 13 48 8D 0D ?? ?? ?? ?? 48 8B D7 E8 ?? ?? ?? ?? 84 C0 74 BC 8B 8F, ResolveInstructionLenght by 7
-		uint64_t ViewPort; // 48 8B 15 ? ? ? ? 48 8D 2D ? ? ? ? 48 8B CD
-		uint64_t Camera; // 48 8B 05 ? ? ? ? 38 98 ? ? ? ? 8A C3 // b2372 tested
-		uint64_t bIsPlayerAiming; //
-		uint64_t PlayerAimingAt; //
-		uint64_t HandleBullet; // 
-		uint64_t BlipList; // 
+        uint64_t World;
+        uint64_t ReplayInterface;
+        uint64_t Camera;
+        uint64_t ViewPort;
 
-		DWORD Pid;
-		uint64_t ModuleBase;
-		std::string ModuleName;
-		std::string FivemFolder;
-		std::string CrashoMetryLocation;
-		std::string ServerIp;
-		std::string ServerPort;
-		nlohmann::json PlayersInfo;
-		std::unordered_map<int, std::string> PlayerIdToName;
-		bool LanGame;
-		GAME_VERSION GameVersion;
+        uint64_t Invisible;
+        uint64_t CanCombatRoll;
+        uint64_t NetSync;
+        uint64_t NetIdToNamesPtr;
+        uint64_t GameplayCamHolder;
+        uint64_t GameplayCamTarget;
+        uint64_t BlipList;
 
-	private:
-		CWorld* pWorld;
-		CPed* pLocalPlayer;
-		CReplayInterface* pReplayInterface;
-		CPedInterface* pPedInterface;
-		CVehicleInterface* pVehicleInterface;
-		CCamGameplayDirector* pCamGameplayDirector;
+        uint64_t HandleBullet;
+        uint64_t PlayerAimingAt;
+        uint64_t OcclusionArray;
 
-		uint64_t pViewPort;
+        uint64_t ModuleBase;
+        uint64_t ModuleBaseSize;
+        uint64_t CitizemPlayerNamesModule;
 
-	private:
-		std::mutex LockLists;
-		std::mutex LockLists2;
-		std::vector<Entity> EntityList;
-		LocalPEDInfo LocalPlayerInfo;
-		std::vector<VehicleInfo> VehicleList;
-	};
+        int GameVersion;
+        int RealGameVersion;
 
-	inline FivemSDK g_Fivem;
+        int  ResolvedBuild = 0;
+        bool WorldValid = false;
+        bool ReplayValid = false;
+        bool ViewPortValid = false;
+        bool CameraValid = false;
+        bool HandleBulletValid = false;
+        bool BlipListValid = false;
+        bool AimingFlagValid = false;
+
+    public:
+        CWorld* pWorld;
+        CPed* pLocalPlayer;
+        CReplayInterface* pReplayInterface;
+        CPedInterface* pPedInterface;
+        CCamGameplayDirector* pCamGameplayDirector;
+        CVehicleInterface* pVehicleInterface;
+
+        uint64_t pViewPort;
+
+    public:
+        std::mutex LockLists;
+        std::mutex LockLists2;
+        std::vector<Entity> EntityList;
+        std::vector<VehicleInfo> VehicleList;
+        LocalPEDInfo LocalPlayerInfo;
+    };
+
+    inline FivemSDK g_Fivem;
 }

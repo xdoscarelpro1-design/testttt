@@ -6,549 +6,614 @@
 
 namespace Cheat
 {
-	class CVehicle
-	{
-	public:
-		uint64_t GetModelInfo()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
-		}
-
-		uint64_t GetDriver()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + Driver);
-		}
-
-		uint64_t GetNavigation()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x30);
-		}
-
-		// Velocity lives right after the navigation matrix position. Leaving it
-		// hot during noclip is what makes the ped visibly lurch ahead for a
-		// frame: the engine keeps integrating v*dt between our position writes.
-		void ZeroVelocity()
-		{
-			if (!this)
-				return;
-
-			const uint64_t Nav = GetNavigation();
-			if (!Nav)
-				return;
-
-			const Vector3D Zero(0.f, 0.f, 0.f);
-			FrameWork::Memory::WriteMemory(Nav + 0x60, Zero);
-			FrameWork::Memory::WriteMemory(this + 0x320, Zero);
-		}
-
-		Vector3D GetCoordinate()
-		{
-			if (!this)
-				return Vector3D{ 0,0,0 };
-
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x90);
-		}
-
-		void SetDoorLock(int Lock)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + DoorLock, Lock);
-		}
-
-		float GetHealth()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<float>(this + 0x280);
-		}
-
-		void SetHealth(float Health)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + 0x280, Health);
-		}
-
-		float GetMaxHealth()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<float>(this + MaxHealth);
-		}
-	};
-
-	class CPlayerInfo
-	{
-	public:
-		int GetPlayerID()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<int>(this + PlayerNetID);
-		}
-
-		void SetStamina(float Value)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + Stamina, Value);
-		}
-
-		void SetSpeed(float Speed)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + PlayerSpeed, Speed);
-		}
-	};
-
-	class CWeaponInfo
-	{
-	public:
-		std::string GetWeaponName()
-		{
-			if (!this)
-				return NULL;
-
-			return FrameWork::Memory::ReadProcessMemoryString(FrameWork::Memory::ReadMemory<uint64_t>(this + 0x05F0));
-		}
-	};
-
-	class CWeaponManager
-	{
-	public:
-		CWeaponInfo* GetWeaponInfo()
-		{
-			if (!this)
-				return 0;
-
-			return (CWeaponInfo*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
-		}
-
-	};
-
-	class CPed
-	{
-	public:
-		CPlayerInfo* GetPlayerInfo()
-		{
-			if (!this)
-				return 0;
-
-			return (CPlayerInfo*)FrameWork::Memory::ReadMemory<uint64_t>(this + PlayerInfo);
-		}
-
-		CWeaponManager* GetWeaponManager()
-		{
-			if (!this)
-				return 0;
-
-			return (CWeaponManager*)FrameWork::Memory::ReadMemory<uint64_t>(this + WeaponManager);
-		}
-
-		CVehicle* GetLastVehicle()
-		{
-			if (!this)
-				return 0;
-
-			return (CVehicle*)FrameWork::Memory::ReadMemory<uint64_t>(this + LastVehicle);
-		}
-
-		uint64_t GetModelInfo()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
-		}
-
-		// Invincibility lives in bit 8 of the dword at 0x188 — i.e. bit 0 of
-		// byte 0x189. The old godmode_on/off wrote a whole byte there, which
-		// clobbered the 7 neighbouring flag bits, and ignored their Toggle
-		// argument entirely so the caller couldn't turn it off.
-		void SetGodMode(bool Toggle)
-		{
-			if (!this)
-				return;
-
-			uint8_t Flags = FrameWork::Memory::ReadMemory<uint8_t>(this + 0x189);
-
-			const uint8_t NewFlags = Toggle
-				? (uint8_t)(Flags | 0x01)
-				: (uint8_t)(Flags & ~0x01);
-
-			if (NewFlags != Flags)
-				FrameWork::Memory::WriteMemory(this + 0x189, NewFlags);
-		}
-
-		void godmode_on(bool Toggle)
-		{
-			SetGodMode(true);
-		}
-		void godmode_off(bool Toggle)
-		{
-			SetGodMode(false);
-		}
-
-		void SetInvencible(bool Toggle)
-		{
-			if (!this)
-				return;
-
-			uint64_t OldFlag = FrameWork::Memory::ReadMemory<uint64_t>(this + 0x188);
-			FrameWork::Memory::WriteMemory(this + 0x188, Toggle ? (OldFlag | (1 << 8)) : (OldFlag & ~(1 << 8)));
-		}
-
-		uint64_t GetNavigation()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x30);
-		}
-
-		// Velocity lives right after the navigation matrix position. Leaving it
-		// hot during noclip is what makes the ped visibly lurch ahead for a
-		// frame: the engine keeps integrating v*dt between our position writes.
-		void ZeroVelocity()
-		{
-			if (!this)
-				return;
-
-			const uint64_t Nav = GetNavigation();
-			if (!Nav)
-				return;
-
-			const Vector3D Zero(0.f, 0.f, 0.f);
-			FrameWork::Memory::WriteMemory(Nav + 0x60, Zero);
-			FrameWork::Memory::WriteMemory(this + 0x320, Zero);
-		}
-
-		Vector3D GetCoordinate()
-		{
-			if (!this)
-				return Vector3D{ 0,0,0 };
-		
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x90);
-		}
-
-		bool IsGodMode()
-		{
-			if (!this)
-				return false;
-
-			return (FrameWork::Memory::ReadMemory<uint8_t>(this + 0x189) & 0x01) != 0;
-		}
-
-		float GetHealth()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<float>(this + 0x280);
-		}
-
-		void SetHealth(float NewHealth)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + 0x280, NewHealth);
-		}
-
-		float GetMaxHealth()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<float>(this + MaxHealth);
-		}
-
-		float GetArmor()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<float>(this + Armor);
-		}
-
-		uint32_t GetPedType()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint32_t>(this + EntityType);
-		}
-
-		bool IsVisible()
-		{
-			if (!this)
-				return false;
-
-			BYTE VisibilityFlag = FrameWork::Memory::ReadMemory<BYTE>(this + VisibleFlag);
-
-			if (VisibilityFlag == 36 || VisibilityFlag == 0 || VisibilityFlag == 4)
-				return false;
-
-			return true;
-		}
-
-		bool IsNPC()
-		{
-			uint32_t PedType = GetPedType();
-
-			if (!PedType)
-				return false;
-
-			PedType = PedType << 11 >> 25;
-
-			if (PedType != 2)
-				return true;
-
-			return false;
-		}
-
-		bool IsAnimal()
-		{
-			uint32_t PedType = GetPedType();
-
-			if (!PedType)
-				return false;
-
-			PedType = PedType << 11 >> 25;
-
-			if (PedType > 27)
-				return true;
-
-			return false;
-		}
-
-		void SetConfigFlag(ePedConfigFlags Flag, bool Value)
-		{
-			int v1 = (int)Flag;
-			if (!this || v1 >= 0x1CA)
-				return;
-
-			auto v2 = 1 << (v1 & 0x1F);
-			auto v3 = v1 >> 5;
-			auto v4 = (uint64_t)this + 4 * v3 + ConfigFlags;
-			auto v5 = FrameWork::Memory::ReadMemory<long>(v4);
-
-			if (Value != ((v2 & v5) != 0))
-			{
-				auto v6 = v2 & (v5 ^ -(uint8_t)(Value ? 1 : 0));
-				v5 ^= v6;
-
-				FrameWork::Memory::WriteMemory(v4, v5);
-			}
-		}
-
-		bool HasConfigFlag(ePedConfigFlags Flag)
-		{
-			int v1 = (int)Flag;
-			if (!this || v1 >= 0x1CA) 
-				return false;
-
-			auto v2 = 1 << (v1 & 0x1F);
-			auto v3 = v1 >> 5;
-			auto v4 = (uint64_t)this + 4 * v3 + ConfigFlags;
-			auto v5 = FrameWork::Memory::ReadMemory<long>(v4);
-
-			return (v2 & v5) != 0;
-		}
-	};
-
-	class CPedList
-	{
-	public:
-		CPed* Ped(int Index)
-		{
-			if (!this) 
-				return 0;
-
-			return (CPed*)FrameWork::Memory::ReadMemory<uint64_t>(this + (Index * 0x10));
-		}
-	};
-
-	class CPedInterface
-	{
-	public:
-		CPedList* PedList()
-		{
-			if (!this) 
-				return 0;
-
-			return (CPedList*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x100);
-		}
-
-		uint64_t PedMaximum()
-		{
-			if (!this) 
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x108);
-		}
-	};
-
-	class CVehicleList
-	{
-	public:
-		CVehicle* Vehicle(int Index)
-		{
-			if (!this)
-				return 0;
-
-			return (CVehicle*)FrameWork::Memory::ReadMemory<uint64_t>(this + (Index * 0x10));
-		}
-	};
-
-	class CVehicleInterface
-	{
-	public:
-		CVehicleList* VehicleList()	
-		{
-			if (!this)
-				return 0;
-
-			return (CVehicleList*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x180);
-		}
-
-		uint64_t VehicleMaximum()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x188);
-		}
-
-		uint64_t VehiclesAtList()
-		{
-			if (!this)
-				return 0;
-
-			return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x190);
-		}
-	};
-
-	class CReplayInterface
-	{
-	public:
-		CVehicleInterface* VehicleInterface()
-		{
-			if (!this)
-				return 0;
-
-			return (CVehicleInterface*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x10);
-		}
-
-		CPedInterface* PedInterface()
-		{
-			if (!this) 
-				return 0;
-
-			return (CPedInterface*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x18);
-		}
-	};
-
-	class CCamFollowPedCamera
-	{
-	public:
-		Vector3D GetViewAngles()
-		{
-			if (!this)
-				return Vector3D(0, 0, 0);
-
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x40);
-		}
-
-		void SetViewAngles(Vector3D Angles)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + 0x40, Angles);
-		}
-
-		Vector3D GetCrosshairPosition()
-		{
-			if (!this)
-				return Vector3D(0, 0, 0);
-
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x60);
-		}
-
-		void SetCrosshairPosition(Vector3D Position)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + 0x60, Position);
-		}
-
-		Vector3D GetThirdpersonViewAngles()
-		{
-			if (!this)
-				return Vector3D(0, 0, 0);
-
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x3d0);
-		}
-
-		void SetThirdpersonViewAngles(Vector3D ViewAngles)
-		{
-			if (!this)
-				return;
-
-			FrameWork::Memory::WriteMemory(this + 0x3d0, ViewAngles);
-		}
-
-
-		Vector3D GetCameraPosition()
-		{
-			if (!this)
-				return Vector3D(0, 0, 0);
-
-			return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x3F0);
-		}
-	};
-
-	class CCamGameplayDirector
-	{
-	public:
-		CCamFollowPedCamera* GetFollowPedCamera()
-		{
-			if (!this)
-				return 0;
-
-			return (CCamFollowPedCamera*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x3C0);
-		}
-	};
-
-	class CWorld
-	{
-	public:
-		CPed* LocalPlayer()
-		{
-			if (!this)
-				return 0;
-
-			return (CPed*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x8);
-		}
-	};
+    class CPed;
+
+    class CWeaponInfo
+    {
+    public:
+        std::string GetWeaponName()
+        {
+            if (!this)
+                return "";
+
+            return FrameWork::Memory::ReadProcessMemoryString(FrameWork::Memory::ReadMemory<uint64_t>(this + 0x05F0));
+        }
+    };
+
+    class CWeaponManager
+    {
+    public:
+        CWeaponInfo* GetWeaponInfo()
+        {
+            if (!this)
+                return 0;
+
+            return (CWeaponInfo*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
+        }
+    };
+
+    class CVehicle
+    {
+    public:
+        uint64_t GetModelInfo()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
+        }
+
+        uint64_t GetDriver()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + Offsets::Driver);
+        }
+
+        uint64_t GetNavigation()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x30);
+        }
+
+        void ZeroVelocity()
+        {
+            if (!this)
+                return;
+
+            const uint64_t Nav = GetNavigation();
+            if (!Nav)
+                return;
+
+            const Vector3D Zero(0.f, 0.f, 0.f);
+            FrameWork::Memory::WriteMemory(Nav + 0x60, Zero);
+            FrameWork::Memory::WriteMemory(this + 0x320, Zero);
+        }
+
+        Vector3D GetCoordinate()
+        {
+            if (!this)
+                return Vector3D{ 0,0,0 };
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x90);
+        }
+
+        void SetLockState(eCarLockState NewState)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + Offsets::DoorLock, (unsigned int)NewState);
+        }
+
+        eCarLockState GetLockState()
+        {
+            if (!this)
+                return (eCarLockState)0;
+
+            return FrameWork::Memory::ReadMemory<eCarLockState>(this + Offsets::DoorLock);
+        }
+
+        float GetHealth()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<float>(this + 0x280);
+        }
+
+        void SetHealth(float Health)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x280, Health);
+        }
+
+        float GetMaxHealth()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<float>(this + Offsets::MaxHealth);
+        }
+
+        void FuckVehicleEngine()
+        {
+            if (!this) return;
+
+            FrameWork::Memory::WriteMemory<float>((uintptr_t)this + 0x844, -4000.f);
+            SetHealth(-4000.f);
+        }
+
+        void FixEngine()
+        {
+            if (!this) return;
+
+            FrameWork::Memory::WriteMemory<float>((uintptr_t)this + 0x844, 1000.f);
+            SetHealth(1000.f);
+        }
+    };
+
+    class CPlayerInfo
+    {
+    public:
+        int GetPlayerID()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<int>(this + Offsets::PlayerNetID);
+        }
+
+        void SetStamina(float Value)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + Offsets::Stamina, Value);
+        }
+
+        void SetSpeed(float Speed)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + Offsets::PlayerSpeed, Speed);
+        }
+    };
+
+    class CPed
+    {
+    public:
+        CPlayerInfo* GetPlayerInfo()
+        {
+            if (!this)
+                return 0;
+
+            return (CPlayerInfo*)FrameWork::Memory::ReadMemory<uint64_t>(this + Offsets::PlayerInfo);
+        }
+
+        CWeaponManager* GetWeaponManager()
+        {
+            if (!this)
+                return 0;
+
+            return (CWeaponManager*)FrameWork::Memory::ReadMemory<uint64_t>(this + Offsets::WeaponManager);
+        }
+
+        CVehicle* GetLastVehicle()
+        {
+            if (!this)
+                return 0;
+
+            return (CVehicle*)FrameWork::Memory::ReadMemory<uint64_t>(this + Offsets::LastVehicle);
+        }
+
+        CVehicle* GetCurrentVehicle()
+        {
+            if (!this)
+                return 0;
+
+            return (CVehicle*)FrameWork::Memory::ReadMemory<uint64_t>(this + Offsets::LastVehicle);
+        }
+
+        bool IsInVehicle()
+        {
+            if (!this) return false;
+            return GetCurrentVehicle() != nullptr;
+        }
+
+        uint64_t GetModelInfo()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x20);
+        }
+
+        void SetGodMode(bool Toggle)
+        {
+            if (!this)
+                return;
+
+            uint8_t Flags = FrameWork::Memory::ReadMemory<uint8_t>(this + 0x189);
+
+            const uint8_t NewFlags = Toggle
+                ? (uint8_t)(Flags | 0x01)
+                : (uint8_t)(Flags & ~0x01);
+
+            if (NewFlags != Flags)
+                FrameWork::Memory::WriteMemory(this + 0x189, NewFlags);
+        }
+
+        void SetInvencible(bool Toggle)
+        {
+            if (!this)
+                return;
+
+            uint64_t OldFlag = FrameWork::Memory::ReadMemory<uint64_t>(this + 0x188);
+            FrameWork::Memory::WriteMemory(this + 0x188, Toggle ? (OldFlag | (1 << 8)) : (OldFlag & ~(1 << 8)));
+        }
+
+        uint64_t GetNavigation()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x30);
+        }
+
+        void ZeroVelocity()
+        {
+            if (!this)
+                return;
+
+            const uint64_t Nav = GetNavigation();
+            if (!Nav)
+                return;
+
+            const Vector3D Zero(0.f, 0.f, 0.f);
+            FrameWork::Memory::WriteMemory(Nav + 0x60, Zero);
+            FrameWork::Memory::WriteMemory(this + 0x320, Zero);
+        }
+
+        Vector3D GetCoordinate()
+        {
+            if (!this)
+                return Vector3D{ 0,0,0 };
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x90);
+        }
+
+        bool IsGodMode()
+        {
+            if (!this)
+                return false;
+
+            return (FrameWork::Memory::ReadMemory<uint8_t>(this + 0x189) & 0x01) != 0;
+        }
+
+        float GetHealth()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<float>(this + 0x280);
+        }
+
+        void SetHealth(float NewHealth)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x280, NewHealth);
+        }
+
+        float GetMaxHealth()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<float>(this + Offsets::MaxHealth);
+        }
+
+        float GetArmor()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<float>(this + Offsets::Armor);
+        }
+
+        void SetArmor(float NewArmor)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + Offsets::Armor, NewArmor);
+        }
+
+        uint32_t GetPedType()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint32_t>(this + Offsets::EntityType);
+        }
+
+        bool IsVisible()
+        {
+            if (!this)
+                return false;
+
+            uint64_t currentVehicle = FrameWork::Memory::ReadMemory<uint64_t>((uintptr_t)this + Offsets::LastVehicle);
+            if (currentVehicle)
+            {
+                BYTE VehicleFlag = FrameWork::Memory::ReadMemory<BYTE>(currentVehicle + Offsets::VisibleFlag);
+                return (VehicleFlag != 36 && VehicleFlag != 0 && VehicleFlag != 4);
+            }
+
+            BYTE VisibilityFlag = FrameWork::Memory::ReadMemory<BYTE>((uintptr_t)this + Offsets::VisibleFlag);
+
+            if (VisibilityFlag == 36 || VisibilityFlag == 0 || VisibilityFlag == 4)
+                return false;
+
+            return true;
+        }
+
+        bool IsNPC()
+        {
+            if (!this)
+                return false;
+            uintptr_t playerInfos = FrameWork::Memory::ReadMemory<uintptr_t>(this + Offsets::PlayerInfo);
+            return !playerInfos;
+        }
+
+        bool IsAnimal()
+        {
+            uint32_t PedType = GetPedType();
+
+            if (!PedType)
+                return false;
+
+            PedType = PedType << 11 >> 25;
+
+            if (PedType > 27)
+                return true;
+
+            return false;
+        }
+
+        struct Rotation {
+            float yaw, pitch, roll;
+        };
+
+        Vector3D get_forward_vector(const Rotation& rot) {
+            float length = std::sqrt(rot.yaw * rot.yaw + rot.pitch * rot.pitch + rot.roll * rot.roll);
+            if (length != 0) {
+                return { rot.yaw / length, rot.pitch / length, rot.roll / length };
+            }
+            return { 0, 0, 0 };
+        }
+
+        bool IsLookingAtYou(const Vector3D& localPos)
+        {
+            Vector3D other_pos = GetCoordinate();
+            Vector3D direction_to_you = localPos - other_pos;
+            direction_to_you.Normalize();
+
+            uint64_t navigation = FrameWork::Memory::ReadMemory<uint64_t>((uintptr_t)this + 0x30);
+            if (!navigation) return false;
+
+            Rotation other_rot = FrameWork::Memory::ReadMemory<Rotation>(navigation + 0x30);
+            Vector3D other_forward = get_forward_vector(other_rot);
+
+            float dot_product = direction_to_you.Dot(other_forward);
+
+            const float threshold = 0.9f;
+            return dot_product > threshold;
+        }
+
+        void SetConfigFlag(ePedConfigFlags Flag, bool Value)
+        {
+            int v1 = (int)Flag;
+            if (!this || v1 >= 0x1CA)
+                return;
+
+            auto v2 = 1 << (v1 & 0x1F);
+            auto v3 = v1 >> 5;
+            auto v4 = (uint64_t)this + 4 * v3 + Offsets::ConfigFlags;
+            auto v5 = FrameWork::Memory::ReadMemory<long>(v4);
+
+            if (Value != ((v2 & v5) != 0))
+            {
+                auto v6 = v2 & (v5 ^ -(uint8_t)(Value ? 1 : 0));
+                v5 ^= v6;
+
+                FrameWork::Memory::WriteMemory(v4, v5);
+            }
+        }
+
+        bool HasConfigFlag(ePedConfigFlags Flag)
+        {
+            int v1 = (int)Flag;
+            if (!this || v1 >= 0x1CA)
+                return false;
+
+            auto v2 = 1 << (v1 & 0x1F);
+            auto v3 = v1 >> 5;
+            auto v4 = (uint64_t)this + 4 * v3 + Offsets::ConfigFlags;
+            auto v5 = FrameWork::Memory::ReadMemory<long>(v4);
+
+            return (v2 & v5) != 0;
+        }
+    };
+
+    class CPedList
+    {
+    public:
+        CPed* Ped(int Index)
+        {
+            if (!this)
+                return 0;
+
+            return (CPed*)FrameWork::Memory::ReadMemory<uint64_t>(this + (Index * 0x10));
+        }
+    };
+
+    class CPedInterface
+    {
+    public:
+        CPedList* PedList()
+        {
+            if (!this)
+                return 0;
+
+            return (CPedList*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x100);
+        }
+
+        uint64_t PedMaximum()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x108);
+        }
+    };
+
+    class CVehicleList
+    {
+    public:
+        CVehicle* Vehicle(int Index)
+        {
+            if (!this)
+                return 0;
+
+            return (CVehicle*)FrameWork::Memory::ReadMemory<uint64_t>(this + (Index * 0x10));
+        }
+    };
+
+    class CVehicleInterface
+    {
+    public:
+        CVehicleList* VehicleList()
+        {
+            if (!this)
+                return 0;
+
+            return (CVehicleList*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x180);
+        }
+
+        uint64_t VehicleMaximum()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x188);
+        }
+
+        uint64_t VehiclesAtList()
+        {
+            if (!this)
+                return 0;
+
+            return FrameWork::Memory::ReadMemory<uint64_t>(this + 0x190);
+        }
+    };
+
+    class CReplayInterface
+    {
+    public:
+        CVehicleInterface* VehicleInterface()
+        {
+            if (!this)
+                return 0;
+
+            return (CVehicleInterface*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x10);
+        }
+
+        CPedInterface* PedInterface()
+        {
+            if (!this)
+                return 0;
+
+            return (CPedInterface*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x18);
+        }
+    };
+
+    class CCamFollowPedCamera
+    {
+    public:
+        Vector3D GetViewAngles()
+        {
+            if (!this)
+                return Vector3D(0, 0, 0);
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x40);
+        }
+
+        void SetViewAngles(Vector3D Angles)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x40, Angles);
+        }
+
+        Vector3D GetCrosshairPosition()
+        {
+            if (!this)
+                return Vector3D(0, 0, 0);
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x60);
+        }
+
+        void SetCrosshairPosition(Vector3D Position)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x60, Position);
+        }
+
+        Vector3D GetThirdpersonViewAngles()
+        {
+            if (!this)
+                return Vector3D(0, 0, 0);
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x3d0);
+        }
+
+        void SetThirdpersonViewAngles(Vector3D ViewAngles)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x3d0, ViewAngles);
+        }
+
+        Vector3D GetCameraPosition()
+        {
+            if (!this)
+                return Vector3D(0, 0, 0);
+
+            return FrameWork::Memory::ReadMemory<Vector3D>(this + 0x3F0);
+        }
+
+        void SetCameraPosition(Vector3D NewPosition)
+        {
+            if (!this)
+                return;
+
+            FrameWork::Memory::WriteMemory(this + 0x3F0, NewPosition);
+        }
+    };
+
+    class CCamGameplayDirector
+    {
+    public:
+        CCamFollowPedCamera* GetFollowPedCamera()
+        {
+            if (!this)
+                return 0;
+
+            return (CCamFollowPedCamera*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x3C0);
+        }
+    };
+
+    class CWorld
+    {
+    public:
+        CPed* LocalPlayer()
+        {
+            if (!this)
+                return 0;
+
+            return (CPed*)FrameWork::Memory::ReadMemory<uint64_t>(this + 0x8);
+        }
+    };
 }
