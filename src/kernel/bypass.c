@@ -252,12 +252,14 @@ void __attribute__((naked)) BypassSpoofedCall(void *Target, void *Arg1)
  */
 int BypassCheckTimingAttack(void)
 {
-    uint64_t tsc1, tsc2;
+    uint32_t lo1, hi1, lo2, hi2;
 
-    __asm__ volatile("rdtsc" : "=a"((uint32_t)tsc1), "=d"((uint32_t)(tsc1 >> 32)));
-    /* small delay */
+    __asm__ volatile("rdtsc" : "=a"(lo1), "=d"(hi1));
     __asm__ volatile("nop\nnop\nnop\nnop");
-    __asm__ volatile("rdtsc" : "=a"((uint32_t)tsc2), "=d"((uint32_t)(tsc2 >> 32)));
+    __asm__ volatile("rdtsc" : "=a"(lo2), "=d"(hi2));
+
+    uint64_t tsc1 = ((uint64_t)hi1 << 32) | lo1;
+    uint64_t tsc2 = ((uint64_t)hi2 << 32) | lo2;
 
     /* if cycle count is suspiciously high, someone is single-stepping */
     if (tsc2 - tsc1 > 1000)
