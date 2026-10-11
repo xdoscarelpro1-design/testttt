@@ -6,6 +6,7 @@
  */
 
 #include "bootkit.h"
+#include "patterns.h"
 
 /*
  * Scan a memory region for a byte pattern.
