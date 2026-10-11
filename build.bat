@@ -133,11 +133,11 @@ set CFLAGS=%CFLAGS% /I%INC% /I%SRC_CHEAT% /I%DXSDK_INC%
 
 :: Linker flags
 set LDFLAGS=/Fe:%BUILD_CHEAT%\phantom_cheat.dll
-set LIBS=kernel32.lib user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib advapi32.lib ntdll.lib dwmapi.lib
+set LIBS=kernel32.lib user32.lib gdi32.lib shell32.lib shlwapi.lib ole32.lib advapi32.lib ntdll.lib dwmapi.lib winhttp.lib
 set LIBS=%LIBS% /LIBPATH:%DXSDK_LIB% d3d11.lib d3dx11.lib dxgi.lib
 
 echo [*] cl.exe compilando %BUILD_CHEAT%\phantom_cheat.dll ...
-cl %CFLAGS% %SRCS% /link %LDFLAGS% %LIBS% /ENTRY:DllMain /DLL /MACHINE:X64
+cl %CFLAGS% %SRCS% /link %LDFLAGS% %LIBS% /DLL /MACHINE:X64
 if errorlevel 1 (
     echo [FAIL] Error compilando cheat DLL
     exit /b 1
