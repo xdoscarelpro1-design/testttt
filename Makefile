@@ -133,34 +133,18 @@ cheatdll: dirs $(CHEAT_BLOB)
 	@echo "[+] Cheat DLL built: $(CHEAT_DLL)"
 	@echo "[+] Cheat blob generated: $(CHEAT_BLOB)"
 
-$(CHEAT_DLL): $(CHEAT_SRCS) | dirs
-	$(MINGW_CXX) $(CFLAGS_CHEAT) \
-		-shared -Wl,--entry,DllMain \
-		-o $@ $(CHEAT_SRCS) \
-		-lkernel32 -luser32 -lntdll -ld3d11 -ldxgi
-	@echo "[*] Cheat DLL compiled: $@ ($$(stat -c%s $@ 2>/dev/null || echo '?') bytes)"
+$(CHEAT_DLL): | dirs
+	@if [ -f $@ ]; then \
+		echo "[*] Cheat DLL found: $@ (pre-built by build.bat/MSVC)"; \
+	else \
+		echo "[ERROR] Cheat DLL not found: $@"; \
+		echo "        Build it first on Windows with: build.bat"; \
+		exit 1; \
+	fi
 
 $(CHEAT_BLOB): $(CHEAT_DLL)
 	@echo "[*] Converting cheat DLL to embedded blob..."
-	@python3 -c "\
-	import sys; \
-	data = open('$(CHEAT_DLL)', 'rb').read(); \
-	f = open('$(CHEAT_BLOB)', 'w'); \
-	f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n'); \
-	f.write('#define _CHEAT_PAYLOAD_BLOB_H_\n\n'); \
-	f.write('/*\n'); \
-	f.write(' * Auto-generated from $(CHEAT_DLL)\n'); \
-	f.write(' * Size: %d bytes\n' % len(data)); \
-	f.write(' * DO NOT EDIT\n'); \
-	f.write(' */\n\n'); \
-	f.write('static const unsigned char gCheatPayloadBlob[] = {\n'); \
-	for i in range(0, len(data), 16): \
-	    chunk = data[i:i+16]; \
-	    f.write('    ' + ', '.join('0x%02x' % b for b in chunk) + ',\n'); \
-	f.write('};\n\n'); \
-	f.write('#endif /* _CHEAT_PAYLOAD_BLOB_H_ */\n'); \
-	f.close(); \
-	print('[+] Cheat blob: %d bytes embedded' % len(data))"
+	@python3 -c "data=open('$(CHEAT_DLL)','rb').read();f=open('$(CHEAT_BLOB)','w');f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n#define _CHEAT_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gCheatPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%%02x'%%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Cheat blob: %%d bytes embedded'%%len(data))"
 
 # ─── kernel payload (depends on cheat blob) ───
 payload: dirs cheatdll $(KERN_BIN)
@@ -179,20 +163,7 @@ $(BUILD_KERN)/kernel_payload.elf: $(KERN_OBJS)
 $(KERN_BIN): $(BUILD_KERN)/kernel_payload.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 	@echo "[*] Generating payload blob header..."
-	@python3 -c "\
-	import sys; \
-	data = open('$(KERN_BIN)', 'rb').read(); \
-	f = open('$(KERN_BLOB)', 'w'); \
-	f.write('#ifndef _KERNEL_PAYLOAD_BLOB_H_\n'); \
-	f.write('#define _KERNEL_PAYLOAD_BLOB_H_\n\n'); \
-	f.write('static const unsigned char gKernelPayloadBlob[] = {\n'); \
-	for i in range(0, len(data), 16): \
-	    chunk = data[i:i+16]; \
-	    f.write('    ' + ', '.join('0x%%02x' %% b for b in chunk) + ',\n'); \
-	f.write('};\n\n'); \
-	f.write('#endif\n'); \
-	f.close(); \
-	print('[+] Payload blob: %%d bytes' %% len(data))"
+	@python3 -c "data=open('$(KERN_BIN)','rb').read();f=open('$(KERN_BLOB)','w');f.write('#ifndef _KERNEL_PAYLOAD_BLOB_H_\n#define _KERNEL_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gKernelPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%%02x'%%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Payload blob: %%d bytes'%%len(data))"
 
 # ─── EFI bootkit (depends on kernel payload blob) ───
 efi: dirs payload $(EFI_BIN)
