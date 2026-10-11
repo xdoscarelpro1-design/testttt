@@ -2,16 +2,24 @@
 #  PHANTOM EFI Bootkit — Build System
 # ────────────────────────────────────────────────────────────────
 #
+#  Build chain (order matters):
+#    1. Cheat DLL      — x86_64 Windows DLL from C++ sources
+#    2. Cheat blob     — DLL binary → C byte array header
+#    3. Kernel payload — PIC kernel code + embedded cheat blob
+#    4. Payload blob   — kernel binary → C byte array header
+#    5. EFI bootkit    — UEFI application embedding the payload
+#
 #  Prerequisites:
 #    - gnu-efi development package (apt install gnu-efi)
 #    - GCC cross-compiler for EFI (or native x86_64 GCC on Linux)
-#    - x86_64-w64-mingw32-gcc (for kernel payload and usermode comm)
+#    - x86_64-w64-mingw32-g++ (for cheat DLL and kernel payload)
+#    - python3 (for blob generation)
 #
 #  Targets:
-#    make all        — build everything
+#    make all        — build everything (cheat → kernel → EFI)
 #    make efi        — build the EFI bootkit only
 #    make payload    — build the kernel payload only
-#    make comm       — build the usermode communicator (Windows .exe)
+#    make cheatdll   — build the cheat DLL only
 #    make usb        — create a bootable USB image
 #    make clean      — clean all build artifacts
 #
@@ -20,6 +28,7 @@
 # ─── toolchain ───
 CC          := gcc
 MINGW_CC    := x86_64-w64-mingw32-gcc
+MINGW_CXX   := x86_64-w64-mingw32-g++
 OBJCOPY     := objcopy
 LD          := ld
 
@@ -38,7 +47,7 @@ INC         := include
 BUILD       := build
 BUILD_EFI   := $(BUILD)/efi
 BUILD_KERN  := $(BUILD)/kernel
-BUILD_COMM  := $(BUILD)/comm
+BUILD_CHEAT := $(BUILD)/cheat
 BUILD_USB   := $(BUILD)/usb
 
 # ─── flags ───
@@ -65,8 +74,11 @@ CFLAGS_KERN := -ffreestanding -fno-stack-protector \
                -fno-exceptions -fno-asynchronous-unwind-tables \
                -O2 -I$(INC)
 
-# Usermode comm flags (Windows target)
-CFLAGS_COMM := -O2 -I$(INC) -DUNICODE -D_UNICODE
+# Cheat DLL flags (Windows x86_64 usermode)
+CFLAGS_CHEAT := -O2 -I$(INC) -I$(SRC_CHEAT) \
+                -DUNICODE -D_UNICODE \
+                -std=c++17 -fno-rtti -fno-exceptions \
+                -mwindows
 
 # ─── sources ───
 EFI_SRCS    := $(SRC_EFI)/main.c \
@@ -76,9 +88,14 @@ EFI_SRCS    := $(SRC_EFI)/main.c \
                $(SRC_EFI)/payload.c
 
 KERN_SRCS   := $(SRC_KERNEL)/entry.c \
-               $(SRC_KERNEL)/bypass.c
+               $(SRC_KERNEL)/bypass.c \
+               $(SRC_KERNEL)/monitor.c \
+               $(SRC_KERNEL)/injector.c
 
-COMM_SRCS   := $(SRC_CHEAT)/fivem_comm.c
+CHEAT_SRCS  := $(wildcard $(SRC_CHEAT)/*.cpp) \
+               $(wildcard $(SRC_CHEAT)/Cheat/*.cpp) \
+               $(wildcard $(SRC_CHEAT)/Cheat/Features/**/*.cpp) \
+               $(wildcard $(SRC_CHEAT)/FrameWork/**/*.cpp)
 
 # ─── objects ───
 EFI_OBJS    := $(patsubst $(SRC_EFI)/%.c,$(BUILD_EFI)/%.o,$(EFI_SRCS))
@@ -89,26 +106,68 @@ EFI_SO      := $(BUILD_EFI)/bootx64.so
 EFI_BIN     := $(BUILD_EFI)/bootx64.efi
 KERN_BIN    := $(BUILD_KERN)/kernel_payload.bin
 KERN_BLOB   := $(INC)/kernel_payload_blob.h
-COMM_EXE    := $(BUILD_COMM)/phantom_comm.exe
+CHEAT_DLL   := $(BUILD_CHEAT)/phantom_cheat.dll
+CHEAT_BLOB  := $(INC)/cheat_payload_blob.h
 USB_IMG     := $(BUILD_USB)/phantom_usb.img
 
 # ════════════════════════════════════════════════════════
 #  Targets
 # ════════════════════════════════════════════════════════
 
-.PHONY: all efi payload comm usb clean dirs
+.PHONY: all efi payload cheatdll usb clean dirs help
 
-all: dirs payload efi comm
+all: dirs cheatdll payload efi
+	@echo ""
+	@echo "══════════════════════════════════════════════"
+	@echo "  PHANTOM build complete"
+	@echo "  EFI bootkit:  $(EFI_BIN)"
+	@echo "  Cheat DLL:    $(CHEAT_DLL) (embedded)"
+	@echo "  Kernel:       $(KERN_BIN) (embedded)"
+	@echo "══════════════════════════════════════════════"
 
 dirs:
-	@mkdir -p $(BUILD_EFI) $(BUILD_KERN) $(BUILD_COMM) $(BUILD_USB)
+	@mkdir -p $(BUILD_EFI) $(BUILD_KERN) $(BUILD_CHEAT) $(BUILD_USB)
 
-# ─── kernel payload (built first, embedded in EFI) ───
-payload: dirs $(KERN_BIN)
+# ─── cheat DLL (built first, embedded in kernel payload) ───
+cheatdll: dirs $(CHEAT_BLOB)
+	@echo "[+] Cheat DLL built: $(CHEAT_DLL)"
+	@echo "[+] Cheat blob generated: $(CHEAT_BLOB)"
+
+$(CHEAT_DLL): $(CHEAT_SRCS) | dirs
+	$(MINGW_CXX) $(CFLAGS_CHEAT) \
+		-shared -Wl,--entry,DllMain \
+		-o $@ $(CHEAT_SRCS) \
+		-lkernel32 -luser32 -lntdll -ld3d11 -ldxgi
+	@echo "[*] Cheat DLL compiled: $@ ($$(stat -c%s $@ 2>/dev/null || echo '?') bytes)"
+
+$(CHEAT_BLOB): $(CHEAT_DLL)
+	@echo "[*] Converting cheat DLL to embedded blob..."
+	@python3 -c "\
+	import sys; \
+	data = open('$(CHEAT_DLL)', 'rb').read(); \
+	f = open('$(CHEAT_BLOB)', 'w'); \
+	f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n'); \
+	f.write('#define _CHEAT_PAYLOAD_BLOB_H_\n\n'); \
+	f.write('/*\n'); \
+	f.write(' * Auto-generated from $(CHEAT_DLL)\n'); \
+	f.write(' * Size: %d bytes\n' % len(data)); \
+	f.write(' * DO NOT EDIT\n'); \
+	f.write(' */\n\n'); \
+	f.write('static const unsigned char gCheatPayloadBlob[] = {\n'); \
+	for i in range(0, len(data), 16): \
+	    chunk = data[i:i+16]; \
+	    f.write('    ' + ', '.join('0x%02x' % b for b in chunk) + ',\n'); \
+	f.write('};\n\n'); \
+	f.write('#endif /* _CHEAT_PAYLOAD_BLOB_H_ */\n'); \
+	f.close(); \
+	print('[+] Cheat blob: %d bytes embedded' % len(data))"
+
+# ─── kernel payload (depends on cheat blob) ───
+payload: dirs cheatdll $(KERN_BIN)
 	@echo "[+] Kernel payload built: $(KERN_BIN)"
 	@echo "[+] Payload blob generated: $(KERN_BLOB)"
 
-$(BUILD_KERN)/%.o: $(SRC_KERNEL)/%.c
+$(BUILD_KERN)/%.o: $(SRC_KERNEL)/%.c $(CHEAT_BLOB)
 	$(MINGW_CC) $(CFLAGS_KERN) -c $< -o $@
 
 $(BUILD_KERN)/kernel_payload.elf: $(KERN_OBJS)
@@ -129,14 +188,14 @@ $(KERN_BIN): $(BUILD_KERN)/kernel_payload.elf
 	f.write('static const unsigned char gKernelPayloadBlob[] = {\n'); \
 	for i in range(0, len(data), 16): \
 	    chunk = data[i:i+16]; \
-	    f.write('    ' + ', '.join('0x%02x' % b for b in chunk) + ',\n'); \
+	    f.write('    ' + ', '.join('0x%%02x' %% b for b in chunk) + ',\n'); \
 	f.write('};\n\n'); \
 	f.write('#endif\n'); \
 	f.close(); \
-	print('[+] Blob: %d bytes' % len(data))"
+	print('[+] Payload blob: %%d bytes' %% len(data))"
 
-# ─── EFI bootkit ───
-efi: dirs $(EFI_BIN)
+# ─── EFI bootkit (depends on kernel payload blob) ───
+efi: dirs payload $(EFI_BIN)
 	@echo "[+] EFI bootkit built: $(EFI_BIN)"
 
 $(BUILD_EFI)/%.o: $(SRC_EFI)/%.c $(KERN_BLOB)
@@ -149,14 +208,6 @@ $(EFI_BIN): $(EFI_SO)
 	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic \
 		-j .dynsym -j .rel -j .rela -j .reloc \
 		--target=efi-app-x86_64 $< $@
-
-# ─── usermode communicator ───
-comm: dirs $(COMM_EXE)
-	@echo "[+] Communicator built: $(COMM_EXE)"
-
-$(COMM_EXE): $(COMM_SRCS)
-	$(MINGW_CC) $(CFLAGS_COMM) $< -o $@ \
-		-lntdll -lkernel32 -luser32
 
 # ─── USB image creation ───
 usb: all
@@ -179,12 +230,19 @@ clean:
 help:
 	@echo "PHANTOM EFI Bootkit — Build Targets"
 	@echo ""
-	@echo "  make all      — Build everything (payload → EFI → comm)"
-	@echo "  make efi      — Build EFI bootkit only"
-	@echo "  make payload  — Build kernel payload only"
-	@echo "  make comm     — Build usermode communicator"
-	@echo "  make usb      — Create bootable USB image"
-	@echo "  make clean    — Remove build artifacts"
+	@echo "  make all       — Full build: cheat DLL → kernel → EFI"
+	@echo "  make cheatdll  — Build cheat DLL + generate blob header"
+	@echo "  make payload   — Build kernel payload (requires cheat blob)"
+	@echo "  make efi       — Build EFI bootkit (requires kernel blob)"
+	@echo "  make usb       — Create bootable USB image"
+	@echo "  make clean     — Remove build artifacts"
+	@echo ""
+	@echo "Build chain:"
+	@echo "  cheat .cpp → DLL → C blob → kernel .c → binary → C blob → EFI"
+	@echo ""
+	@echo "Output: Single bootx64.efi containing everything."
+	@echo "        Nothing touches disk. Forensically invisible."
 	@echo ""
 	@echo "Prerequisites:"
-	@echo "  apt install gnu-efi gcc-mingw-w64-x86-64 mtools python3"
+	@echo "  apt install gnu-efi gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64"
+	@echo "              mtools python3"

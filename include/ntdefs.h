@@ -112,6 +112,76 @@ typedef PVOID    (*fn_MmMapIoSpace)(PHYSICAL_ADDRESS PhysicalAddress, SIZE_T Num
 typedef void     (*fn_MmUnmapIoSpace)(PVOID BaseAddress, SIZE_T NumberOfBytes);
 typedef NTSTATUS (*fn_ZwQuerySystemInformation)(ULONG InfoClass, PVOID Buffer, ULONG Length, ULONG *ReturnLength);
 
+/* ─── Injector API typedefs ─── */
+typedef NTSTATUS (*fn_KeStackAttachProcess)(PVOID Process, PVOID ApcState);
+typedef void     (*fn_KeUnstackDetachProcess)(PVOID ApcState);
+typedef NTSTATUS (*fn_ZwAllocateVirtualMemory)(
+    HANDLE ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits,
+    SIZE_T *RegionSize, ULONG AllocationType, ULONG Protect
+);
+typedef NTSTATUS (*fn_ZwProtectVirtualMemory)(
+    HANDLE ProcessHandle, PVOID *BaseAddress, SIZE_T *RegionSize,
+    ULONG NewProtect, ULONG *OldProtect
+);
+typedef PVOID    (*fn_PsGetProcessPeb)(PVOID Process);
+typedef NTSTATUS (*fn_PsCreateSystemThread)(
+    HANDLE *ThreadHandle, ULONG DesiredAccess, PVOID ObjectAttributes,
+    HANDLE ProcessHandle, PVOID ClientId, PVOID StartRoutine, PVOID StartContext
+);
+typedef NTSTATUS (*fn_ZwClose)(HANDLE Handle);
+typedef PVOID    (*fn_ExAllocatePool)(ULONG PoolType, SIZE_T NumberOfBytes);
+typedef void     (*fn_ExFreePool)(PVOID P);
+typedef NTSTATUS (*fn_KeDelayExecutionThread)(UCHAR WaitMode, BOOLEAN Alertable, PVOID Interval);
+typedef NTSTATUS (*fn_ZwCreateThreadEx)(
+    HANDLE *ThreadHandle, ULONG DesiredAccess, PVOID ObjectAttributes,
+    HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument,
+    ULONG CreateFlags, SIZE_T ZeroBits, SIZE_T StackSize,
+    SIZE_T MaxStackSize, PVOID AttributeList
+);
+
+/* ─── Memory allocation constants ─── */
+#define MEM_COMMIT              0x00001000
+#define MEM_RESERVE             0x00002000
+#define PAGE_READWRITE          0x04
+#define PAGE_EXECUTE_READ       0x20
+#define PAGE_EXECUTE_READWRITE  0x40
+#define PAGE_NOACCESS           0x01
+
+/* ─── PE relocation types ─── */
+#define IMAGE_REL_BASED_DIR64   10
+#define IMAGE_REL_BASED_HIGHLOW 3
+
+/* ─── KAPC_STATE for KeStackAttachProcess ─── */
+typedef struct _KAPC_STATE {
+    LIST_ENTRY  ApcListHead[2];
+    PVOID       Process;
+    UCHAR       InProgressFlags;
+    UCHAR       KernelApcPending;
+    UCHAR       UserApcPendingAll;
+    UCHAR       _pad;
+} KAPC_STATE;
+
+/* ─── User-mode PEB/LDR structures (read from target process) ─── */
+typedef struct _PEB_LDR_DATA_UM {
+    ULONG       Length;
+    BOOLEAN     Initialized;
+    PVOID       SsHandle;
+    LIST_ENTRY  InLoadOrderModuleList;
+    LIST_ENTRY  InMemoryOrderModuleList;
+    LIST_ENTRY  InInitOrderModuleList;
+} PEB_LDR_DATA_UM;
+
+typedef struct _LDR_DATA_TABLE_ENTRY_UM {
+    LIST_ENTRY      InLoadOrderLinks;
+    LIST_ENTRY      InMemoryOrderLinks;
+    LIST_ENTRY      InInitOrderLinks;
+    PVOID           DllBase;
+    PVOID           EntryPoint;
+    ULONG           SizeOfImage;
+    UNICODE_STRING  FullDllName;
+    UNICODE_STRING  BaseDllName;
+} LDR_DATA_TABLE_ENTRY_UM;
+
 /* ─── Kernel API table (resolved at runtime) ─── */
 typedef struct _KERNEL_API {
     fn_ExAllocatePool2              ExAllocatePool2;
@@ -124,6 +194,18 @@ typedef struct _KERNEL_API {
     fn_MmMapIoSpace                 MmMapIoSpace;
     fn_MmUnmapIoSpace               MmUnmapIoSpace;
     fn_ZwQuerySystemInformation     ZwQuerySystemInformation;
+    /* injector APIs */
+    fn_KeStackAttachProcess         KeStackAttachProcess;
+    fn_KeUnstackDetachProcess       KeUnstackDetachProcess;
+    fn_ZwAllocateVirtualMemory      ZwAllocateVirtualMemory;
+    fn_ZwProtectVirtualMemory       ZwProtectVirtualMemory;
+    fn_PsGetProcessPeb              PsGetProcessPeb;
+    fn_PsCreateSystemThread         PsCreateSystemThread;
+    fn_ZwClose                      ZwClose;
+    fn_ExAllocatePool               ExAllocatePool;
+    fn_ExFreePool                   ExFreePool;
+    fn_KeDelayExecutionThread       KeDelayExecutionThread;
+    fn_ZwCreateThreadEx             ZwCreateThreadEx;
 } KERNEL_API;
 
 /* ─── Communication protocol ─── */
@@ -158,6 +240,12 @@ typedef struct _PAYLOAD_CONTEXT {
     UINTN           PayloadSize;
     BOOLEAN         Initialized;
     BOOLEAN         Hidden;
+    /* injector state */
+    uint8_t        *CheatDllBlob;
+    UINTN           CheatDllSize;
+    BOOLEAN         CheatInjected;
+    HANDLE          TargetPid;
+    PVOID           MappedBase;
 } PAYLOAD_CONTEXT;
 
 #endif /* _NTDEFS_H_ */

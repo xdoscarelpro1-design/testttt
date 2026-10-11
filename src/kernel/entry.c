@@ -15,6 +15,13 @@
 
 #include "ntdefs.h"
 
+/* embedded cheat DLL blob (generated at build time) */
+#include "cheat_payload_blob.h"
+
+/* from monitor.c */
+extern void MonitorStart(PAYLOAD_CONTEXT *Ctx);
+extern int  MonitorCheckForTarget(PAYLOAD_CONTEXT *Ctx);
+
 /* forward declarations */
 static PVOID  ResolveKernelApi(PVOID NtoskrnlBase, const char *FuncName);
 static void   InstallSyscallHook(PAYLOAD_CONTEXT *Ctx);
@@ -83,6 +90,31 @@ void __attribute__((section(".text"))) PayloadEntry(PVOID NtoskrnlBase, UINTN Nt
     Ctx.Api.MmMapIoSpace = (fn_MmMapIoSpace)ResolveKernelApi(NtoskrnlBase, s_MmMapIoSpace);
     Ctx.Api.MmUnmapIoSpace = (fn_MmUnmapIoSpace)ResolveKernelApi(NtoskrnlBase, s_MmUnmapIoSpace);
 
+    /* ─── resolve injector APIs ─── */
+    char s_KeStackAttachProcess[] = {'K','e','S','t','a','c','k','A','t','t','a','c','h','P','r','o','c','e','s','s',0};
+    char s_KeUnstackDetachProcess[] = {'K','e','U','n','s','t','a','c','k','D','e','t','a','c','h','P','r','o','c','e','s','s',0};
+    char s_ZwAllocateVirtualMemory[] = {'Z','w','A','l','l','o','c','a','t','e','V','i','r','t','u','a','l','M','e','m','o','r','y',0};
+    char s_ZwProtectVirtualMemory[] = {'Z','w','P','r','o','t','e','c','t','V','i','r','t','u','a','l','M','e','m','o','r','y',0};
+    char s_PsGetProcessPeb[] = {'P','s','G','e','t','P','r','o','c','e','s','s','P','e','b',0};
+    char s_PsCreateSystemThread[] = {'P','s','C','r','e','a','t','e','S','y','s','t','e','m','T','h','r','e','a','d',0};
+    char s_ZwClose[] = {'Z','w','C','l','o','s','e',0};
+    char s_ExAllocatePool[] = {'E','x','A','l','l','o','c','a','t','e','P','o','o','l',0};
+    char s_ExFreePool[] = {'E','x','F','r','e','e','P','o','o','l',0};
+    char s_KeDelayExecutionThread[] = {'K','e','D','e','l','a','y','E','x','e','c','u','t','i','o','n','T','h','r','e','a','d',0};
+    char s_ZwCreateThreadEx[] = {'Z','w','C','r','e','a','t','e','T','h','r','e','a','d','E','x',0};
+
+    Ctx.Api.KeStackAttachProcess = (fn_KeStackAttachProcess)ResolveKernelApi(NtoskrnlBase, s_KeStackAttachProcess);
+    Ctx.Api.KeUnstackDetachProcess = (fn_KeUnstackDetachProcess)ResolveKernelApi(NtoskrnlBase, s_KeUnstackDetachProcess);
+    Ctx.Api.ZwAllocateVirtualMemory = (fn_ZwAllocateVirtualMemory)ResolveKernelApi(NtoskrnlBase, s_ZwAllocateVirtualMemory);
+    Ctx.Api.ZwProtectVirtualMemory = (fn_ZwProtectVirtualMemory)ResolveKernelApi(NtoskrnlBase, s_ZwProtectVirtualMemory);
+    Ctx.Api.PsGetProcessPeb = (fn_PsGetProcessPeb)ResolveKernelApi(NtoskrnlBase, s_PsGetProcessPeb);
+    Ctx.Api.PsCreateSystemThread = (fn_PsCreateSystemThread)ResolveKernelApi(NtoskrnlBase, s_PsCreateSystemThread);
+    Ctx.Api.ZwClose = (fn_ZwClose)ResolveKernelApi(NtoskrnlBase, s_ZwClose);
+    Ctx.Api.ExAllocatePool = (fn_ExAllocatePool)ResolveKernelApi(NtoskrnlBase, s_ExAllocatePool);
+    Ctx.Api.ExFreePool = (fn_ExFreePool)ResolveKernelApi(NtoskrnlBase, s_ExFreePool);
+    Ctx.Api.KeDelayExecutionThread = (fn_KeDelayExecutionThread)ResolveKernelApi(NtoskrnlBase, s_KeDelayExecutionThread);
+    Ctx.Api.ZwCreateThreadEx = (fn_ZwCreateThreadEx)ResolveKernelApi(NtoskrnlBase, s_ZwCreateThreadEx);
+
     /* verify critical APIs resolved */
     if (!Ctx.Api.MmCopyVirtualMemory || !Ctx.Api.PsLookupProcessByProcessId) {
         return;
@@ -96,6 +128,11 @@ void __attribute__((section(".text"))) PayloadEntry(PVOID NtoskrnlBase, UINTN Nt
 
     /* ─── hide our memory from OS ─── */
     HidePayloadMemory(&Ctx);
+
+    /* ─── initialize cheat DLL injector ─── */
+    Ctx.CheatDllBlob = (uint8_t *)gCheatPayloadBlob;
+    Ctx.CheatDllSize = sizeof(gCheatPayloadBlob);
+    MonitorStart(&Ctx);
 
     Ctx.Initialized = 1;
 }
@@ -336,6 +373,10 @@ static NTSTATUS HookedSyscallHandler(COMM_REQUEST *Request)
     return Request->Status;
 
 CallOriginal:
+    /* piggyback on normal syscalls to scan for FiveM */
+    if (gPayloadCtx && gPayloadCtx->Initialized)
+        MonitorCheckForTarget(gPayloadCtx);
+
     if (sOrigSyscallHandler) {
         typedef NTSTATUS (*SYSCALL_FUNC)(PVOID);
         return ((SYSCALL_FUNC)sOrigSyscallHandler)(Request);
