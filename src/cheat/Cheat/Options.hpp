@@ -66,11 +66,16 @@ namespace Cheat
         bool Enabled = false;
         bool ShotNPC = false;
         bool VisibleCheck = true;
+        bool RequireAiming = false;
 
         int KeyBind = 0;
         int KeyBindState = 0;
         int MaxDistance = 250;
         int ReactionTime = 0;
+        int ReactionJitter = 0;
+        int FOV = 100;
+        int HitChance = 100;
+        int RefireDelay = 100;
     };
 
     struct Players_s
@@ -175,6 +180,7 @@ namespace Cheat
         bool VehicleSpeed = false;
         float VehicleSpeedMultiplier = 1.5f;
         int VehicleSpeedBind = 0;
+        bool VehicleGod = false;
         bool Desync = false;
         int DesyncKeyBind = 0;
 
@@ -259,6 +265,8 @@ namespace Cheat
 
             bool ShowKeybinds = true;
             bool Notifications = true;
+            int ThreadDelay = 0;
+            bool MenuOpen = false;
 
             float ColorBg[4]       = { 10/255.f, 10/255.f, 10/255.f, 1.f };
             float ColorChildBg[4]  = { 16/255.f, 16/255.f, 16/255.f, 1.f };

@@ -58,7 +58,7 @@ namespace Cheat
 
         while (!g_Options.General.ShutDown)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1 + g_Options.General.ThreadDelay));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
             if (!g_Options.LegitBot.Trigger.Enabled || !g_Fivem.GetLocalPlayerInfo().Ped)
             {
@@ -75,13 +75,13 @@ namespace Cheat
             {
                 keyActive = true;
             }
-            else if (g_Options.LegitBot.Trigger.KeyMode == 0)
+            else if (g_Options.LegitBot.Trigger.KeyBindState == 0)
             {
-                keyActive = (GetAsyncKeyState(key) & 0x8000) != 0;
+                keyActive = (SafeCall(GetAsyncKeyState)(key) & 0x8000) != 0;
             }
             else
             {
-                const bool keyDown = (GetAsyncKeyState(key) & 0x8000) != 0;
+                const bool keyDown = (SafeCall(GetAsyncKeyState)(key) & 0x8000) != 0;
                 if (keyDown && !keyWasDown)
                     toggledOn = !toggledOn;
 
@@ -109,7 +109,9 @@ namespace Cheat
             const bool found = g_Fivem.FindClosestEntity(
                 static_cast<float>(g_Options.LegitBot.Trigger.FOV),
                 g_Options.LegitBot.Trigger.MaxDistance,
+                g_Options.LegitBot.Trigger.VisibleCheck,
                 g_Options.LegitBot.Trigger.ShotNPC,
+                0,
                 &target);
 
             // The old code tested `!closestEntity.Visible` unconditionally,
