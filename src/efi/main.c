@@ -30,7 +30,8 @@ static VOID BkConsoleSetColor(UINTN Attr)
 
 EFI_STATUS BkDisplayBanner(VOID)
 {
-    BkConsoleClear();
+    /* NOTE: screen clear disabled for debugging — re-enable once boot works */
+    /* BkConsoleClear(); */
     BkConsoleSetColor(EFI_LIGHTCYAN | EFI_BACKGROUND_BLACK);
 
     BkConsolePrint(L"\r\n");
@@ -327,40 +328,69 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 {
     EFI_STATUS Status;
 
+    /* raw console output BEFORE anything else — if we crash after this,
+       we know the entry point itself works */
+    SystemTable->ConOut->OutputString(SystemTable->ConOut,
+        L"[DBG-1] efi_main entered\r\n");
+    SystemTable->BootServices->Stall(500000);
+
     /* initialize context */
     gCtx.ImageHandle    = ImageHandle;
     gCtx.SystemTable    = SystemTable;
     gCtx.BootServices   = SystemTable->BootServices;
     gCtx.RuntimeServices = SystemTable->RuntimeServices;
 
+    SystemTable->ConOut->OutputString(SystemTable->ConOut,
+        L"[DBG-2] context initialized\r\n");
+    SystemTable->BootServices->Stall(500000);
+
     /* initialize UEFI library */
     InitializeLib(ImageHandle, SystemTable);
 
+    SystemTable->ConOut->OutputString(SystemTable->ConOut,
+        L"[DBG-3] InitializeLib done\r\n");
+    SystemTable->BootServices->Stall(500000);
+
     /* display banner */
     BkDisplayBanner();
+
+    SystemTable->ConOut->OutputString(SystemTable->ConOut,
+        L"[DBG-4] banner done\r\n");
+    SystemTable->BootServices->Stall(1000000);
 
     /* prepare kernel payload in EFI runtime memory */
     Status = BkPrepareKernelPayload();
     if (EFI_ERROR(Status)) {
         BkConsolePrint(L"  [!] Payload preparation failed\r\n");
+        BkConsolePrint(L"  [DBG] BkPrepareKernelPayload returned error\r\n");
+        SystemTable->BootServices->Stall(5000000);
         goto Fail;
     }
     BkConsolePrint(L"  [+] Kernel payload staged in runtime memory\r\n");
+    BkConsolePrint(L"  [DBG-5] payload ready\r\n");
+    SystemTable->BootServices->Stall(500000);
 
     /* install EFI boot service hooks */
     Status = BkInstallBootHooks();
     if (EFI_ERROR(Status)) {
         BkConsolePrint(L"  [!] Hook installation failed\r\n");
+        SystemTable->BootServices->Stall(5000000);
         goto Fail;
     }
     BkConsolePrint(L"  [+] Boot chain hooks installed\r\n");
+    BkConsolePrint(L"  [DBG-6] hooks installed\r\n");
+    SystemTable->BootServices->Stall(500000);
 
     /* wait for USB removal */
     Status = BkWaitForUsbRemoval();
     if (EFI_ERROR(Status)) {
         BkConsolePrint(L"  [!] USB wait failed\r\n");
+        SystemTable->BootServices->Stall(5000000);
         goto Fail;
     }
+
+    BkConsolePrint(L"  [DBG-7] starting boot chain\r\n");
+    SystemTable->BootServices->Stall(500000);
 
     /* locate and chain-load Windows Boot Manager */
     Status = BkChainToBootManager();
