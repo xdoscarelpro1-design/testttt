@@ -6,10 +6,10 @@ setlocal enabledelayedexpansion
 :: ════════════════════════════════════════════════════════════════
 ::
 ::  REQUISITOS:
-::    - Visual Studio 2022 (Community es gratis)
+::    - Visual Studio (2022, 2024, 2026, cualquier version)
 ::      Workload: "Desktop development with C++"
-::    - Ejecutar desde "x64 Native Tools Command Prompt for VS 2022"
-::      o "Developer Command Prompt for VS 2022"
+::    - Ejecutar desde "x64 Native Tools Command Prompt for VS"
+::      o dejar que el script lo detecte automaticamente
 ::
 ::  USO:
 ::    build.bat          — compila la cheat DLL
@@ -18,18 +18,43 @@ setlocal enabledelayedexpansion
 ::
 :: ════════════════════════════════════════════════════════════════
 
-:: Check MSVC
+:: Check MSVC — if cl.exe is not in PATH, try to find vcvars64.bat automatically
 where cl >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] cl.exe no encontrado.
+    echo [*] cl.exe no encontrado en PATH, buscando Visual Studio...
+    set "FOUND_VS="
+
+    :: Check common VS install paths (newest first)
+    for %%Y in (2026 2025 2024 2022) do (
+        for %%E in (Community Professional Enterprise) do (
+            set "VCVARS=C:\Program Files\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat"
+            if exist "!VCVARS!" (
+                echo [*] Encontrado VS %%Y %%E
+                call "!VCVARS!" >nul 2>&1
+                set "FOUND_VS=1"
+                goto :vs_found
+            )
+        )
+    )
+
+    :: Also check vswhere (works with any VS version)
+    for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2^>nul`) do (
+        if exist "%%i\VC\Auxiliary\Build\vcvars64.bat" (
+            echo [*] Encontrado VS via vswhere: %%i
+            call "%%i\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+            set "FOUND_VS=1"
+            goto :vs_found
+        )
+    )
+
+    echo [ERROR] No se encontro Visual Studio.
     echo.
-    echo Abre "x64 Native Tools Command Prompt for VS 2022"
-    echo   Start ^> Visual Studio 2022 ^> x64 Native Tools Command Prompt
-    echo.
-    echo O ejecuta esto primero:
-    echo   "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+    echo Opciones:
+    echo   1. Abre "x64 Native Tools Command Prompt" desde el menu de VS
+    echo   2. Instala Visual Studio con "Desktop development with C++"
     exit /b 1
 )
+:vs_found
 
 set TARGET=%1
 if "%TARGET%"=="" set TARGET=cheatdll
