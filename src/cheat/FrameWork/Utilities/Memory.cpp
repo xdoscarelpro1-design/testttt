@@ -134,15 +134,22 @@ namespace FrameWork
             return VirtualFree((LPVOID)Addr, 0, MEM_RELEASE) != 0;
         }
 
+        static bool ReadBytesRaw(uintptr_t Addr, void* outBuf, size_t Size)
+        {
+            __try {
+                memcpy(outBuf, (const void *)Addr, Size);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
+
         std::vector<uint8_t> ReadBytes(uintptr_t Addr, size_t Size)
         {
             std::vector<uint8_t> result(Size, 0);
-            __try {
-                memcpy(result.data(), (const void *)Addr, Size);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
+            if (!ReadBytesRaw(Addr, result.data(), Size))
                 result.clear();
-            }
             return result;
         }
 

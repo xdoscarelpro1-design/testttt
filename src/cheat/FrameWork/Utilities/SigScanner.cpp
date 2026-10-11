@@ -30,6 +30,26 @@ namespace FrameWork
             }
         }
 
+        static uint64_t ScanMemorySafe(const uint8_t *scan, const uint8_t *scanEnd,
+                                        const uint8_t *pat, const uint8_t *msk, size_t patLen)
+        {
+            __try {
+                for (const uint8_t *cur = scan; cur <= scanEnd; cur++) {
+                    bool found = true;
+                    for (size_t j = 0; j < patLen; j++) {
+                        if (msk[j] && cur[j] != pat[j]) {
+                            found = false;
+                            break;
+                        }
+                    }
+                    if (found)
+                        return (uint64_t)cur;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            return 0;
+        }
+
         uint64_t FindPattern(uint64_t moduleBase, uint64_t moduleSize, const char *pattern)
         {
             std::vector<uint8_t> patternBytes;
@@ -42,22 +62,11 @@ namespace FrameWork
             const uint8_t *scan = (const uint8_t *)moduleBase;
             const uint8_t *scanEnd = scan + moduleSize - patLen;
 
-            __try {
-                for (const uint8_t *cur = scan; cur <= scanEnd; cur++) {
-                    bool found = true;
-                    for (size_t j = 0; j < patLen; j++) {
-                        if (patternMask[j] && cur[j] != patternBytes[j]) {
-                            found = false;
-                            break;
-                        }
-                    }
-                    if (found)
-                        return (uint64_t)cur;
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            std::vector<uint8_t> maskFlat(patLen);
+            for (size_t i = 0; i < patLen; i++)
+                maskFlat[i] = patternMask[i] ? 1 : 0;
 
-            return 0;
+            return ScanMemorySafe(scan, scanEnd, patternBytes.data(), maskFlat.data(), patLen);
         }
 
         uint64_t ResolveRelative(uint64_t address, int instructionLength)

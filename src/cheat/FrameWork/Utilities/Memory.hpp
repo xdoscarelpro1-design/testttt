@@ -74,18 +74,32 @@ namespace FrameWork
             return true;
         }
 
-        inline std::string ReadProcessMemoryString(uint64_t ReadAddress, SIZE_T StringSize = 256)
+        inline bool ReadRawString(uint64_t ReadAddress, char* outBuf, size_t bufSize, size_t* outLen)
         {
             __try {
                 const char *str = (const char *)ReadAddress;
                 size_t len = 0;
-                while (len < StringSize && str[len] != '\0')
+                while (len < bufSize - 1 && str[len] != '\0')
                     len++;
-                return std::string(str, len);
+                memcpy(outBuf, str, len);
+                outBuf[len] = '\0';
+                *outLen = len;
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
-                return "";
+                outBuf[0] = '\0';
+                *outLen = 0;
+                return false;
             }
+        }
+
+        inline std::string ReadProcessMemoryString(uint64_t ReadAddress, SIZE_T StringSize = 256)
+        {
+            char buf[512];
+            size_t len = 0;
+            size_t cap = (StringSize < sizeof(buf)) ? StringSize : sizeof(buf) - 1;
+            ReadRawString(ReadAddress, buf, cap + 1, &len);
+            return std::string(buf, len);
         }
 
         template <typename T, typename B>
