@@ -16,6 +16,8 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+using Cheat::g_Fivem;
+
 // ─── Accent color shorthand ─────────────────────────────────────────────────
 #define ACCENT_R g_Options.General.AccentColor[0]
 #define ACCENT_G g_Options.General.AccentColor[1]
