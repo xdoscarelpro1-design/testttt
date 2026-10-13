@@ -38,7 +38,7 @@ EFI_STATUS BkPrepareKernelPayload(VOID)
     PayloadSize = sizeof(gKernelPayloadBlob);
 #endif
 
-    if (PayloadSize == 0 || PayloadSize > 0x100000) {
+    if (PayloadSize == 0 || PayloadSize > 0x800000) {
         return EFI_INVALID_PARAMETER;
     }
 
@@ -107,28 +107,14 @@ EFI_STATUS BkDeployPayload(VOID)
         return BK_ERR_NOT_FOUND;
 
     /*
-     * At this point, we're in HookedExitBootServices.
-     * The payload is already in runtime memory. We need to:
-     *   1. Write the ntoskrnl base into the payload's context
-     *   2. Ensure the trampoline has the correct addresses
+     * The payload is already in runtime memory. The trampoline in
+     * hooks.c passes ntoskrnl base/size via rcx/rdx registers
+     * directly to PayloadEntry. No header needed.
      *
-     * The payload starts with a PAYLOAD_HEADER structure
-     * that we fill in here.
+     * IMPORTANT: Do NOT write anything at PayloadPhysical —
+     * that's the first byte of PayloadEntry's machine code.
+     * Writing a header there would destroy the entry point.
      */
-    typedef struct {
-        UINT32  Magic;          /* BK_MAGIC */
-        UINT64  NtoskrnlBase;
-        UINT64  NtoskrnlSize;
-        UINT64  PayloadBase;
-        UINT64  PayloadSize;
-    } PAYLOAD_HEADER;
-
-    PAYLOAD_HEADER *Hdr = (PAYLOAD_HEADER *)gCtx.PayloadPhysical;
-    Hdr->Magic        = BK_MAGIC;
-    Hdr->NtoskrnlBase = (UINT64)gCtx.NtoskrnlBase;
-    Hdr->NtoskrnlSize = (UINT64)gCtx.NtoskrnlSize;
-    Hdr->PayloadBase  = (UINT64)gCtx.PayloadPhysical;
-    Hdr->PayloadSize  = (UINT64)gCtx.PayloadSize;
 
     gCtx.PayloadDeployed = TRUE;
 

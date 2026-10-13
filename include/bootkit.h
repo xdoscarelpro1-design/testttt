@@ -120,6 +120,9 @@ typedef struct {
     UINTN                   PayloadSize;
     VOID                   *PayloadRuntimeVa;
 
+    /* trampoline location in winload .text cave */
+    UINT8                  *TrampolineSlot;
+
     /* state flags */
     BOOLEAN                 BootmgfwPatched;
     BOOLEAN                 WinloadPatched;

@@ -126,7 +126,7 @@ $(CHEAT_DLL): | dirs
 
 $(CHEAT_BLOB): $(CHEAT_DLL)
 	@echo "[*] Converting cheat DLL to embedded blob..."
-	@python3 -c "data=open('$(CHEAT_DLL)','rb').read();f=open('$(CHEAT_BLOB)','w');f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n#define _CHEAT_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gCheatPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%02x'%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Cheat blob: %d bytes embedded'%len(data))"
+	@python3 -c "data=open('$(CHEAT_DLL)','rb').read();f=open('$(CHEAT_BLOB)','w');f.write('#ifndef _CHEAT_PAYLOAD_BLOB_H_\n#define _CHEAT_PAYLOAD_BLOB_H_\n\n__attribute__((used, section(\".rdata\"))) const unsigned char gCheatPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%02x'%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\nstatic const unsigned int gCheatPayloadSize = sizeof(gCheatPayloadBlob);\n\n#endif\n');f.close();print('[+] Cheat blob: %d bytes embedded'%len(data))"
 
 # ─── kernel payload (depends on cheat blob) ───
 payload: dirs cheatdll $(KERN_BIN)
@@ -140,10 +140,11 @@ $(BUILD_KERN)/kernel_payload.elf: $(KERN_OBJS)
 	$(MINGW_CC) -nostdlib -fPIC -shared \
 		-Wl,--entry,PayloadEntry \
 		-Wl,-e,PayloadEntry \
+		-Wl,-T,$(SRC_KERNEL)/payload.ld \
 		-o $@ $(KERN_OBJS)
 
 $(KERN_BIN): $(BUILD_KERN)/kernel_payload.elf
-	$(OBJCOPY) -O binary -j .text $< $@
+	$(OBJCOPY) -O binary $< $@
 	@echo "[*] Generating payload blob header..."
 	@python3 -c "data=open('$(KERN_BIN)','rb').read();f=open('$(KERN_BLOB)','w');f.write('#ifndef _KERNEL_PAYLOAD_BLOB_H_\n#define _KERNEL_PAYLOAD_BLOB_H_\n\nstatic const unsigned char gKernelPayloadBlob[] = {\n');[f.write('    '+', '.join('0x%02x'%b for b in data[i:i+16])+',\n') for i in range(0,len(data),16)];f.write('};\n\n#endif\n');f.close();print('[+] Payload blob: %d bytes'%len(data))"
 

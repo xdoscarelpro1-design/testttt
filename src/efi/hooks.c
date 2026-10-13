@@ -208,11 +208,71 @@ static EFI_STATUS PatchWinload(VOID *ImageBase, UINTN ImageSize)
                 0xFF, 0xE0                              /* jmp rax */
             };
 
-            /* fill in payload address */
-            *(UINT64 *)(Trampoline + 17) = (UINT64)gCtx.PayloadPhysical;
+            /* fill in payload address (offset 25: after 23 push bytes + 2 opcode bytes) */
+            *(UINT64 *)(Trampoline + 25) = (UINT64)gCtx.PayloadPhysical;
 
             /* copy trampoline to winload code cave */
             CopyMem(TrampolineSlot, Trampoline, sizeof(Trampoline));
+
+            /* save pointer so ExitBootServices can fill rcx/rdx + jmp target */
+            gCtx.TrampolineSlot = TrampolineSlot;
+
+            /*
+             * Redirect OslArchTransferToKernel to our trampoline.
+             * We overwrite the first 12 bytes of the matched function with:
+             *   mov rax, <trampoline_addr>   ; 48 B8 xx xx xx xx xx xx xx xx
+             *   jmp rax                       ; FF E0
+             *
+             * Save the original bytes so we can put the original function
+             * address in the trampoline's final jmp slot. Since
+             * OslArchTransferToKernel eventually does a jmp to
+             * KiSystemStartup, and we can't easily extract that target,
+             * we instead redirect the entire function through us and
+             * have the trampoline re-execute the original prologue bytes
+             * then jump back to Match+12 to continue.
+             *
+             * Simpler approach: we don't need to return to
+             * OslArchTransferToKernel at all. Our trampoline calls the
+             * payload, then the original function runs. We hook by
+             * inserting a detour at the function start.
+             *
+             * The trampoline's final jmp jumps to Match+12
+             * (rest of OslArchTransferToKernel after our 12-byte patch).
+             * We prepend the saved 12 original bytes before that jmp
+             * so the function still works.
+             */
+
+            /* save original 12 bytes of OslArchTransferToKernel */
+            UINT8 OrigBytes[12];
+            CopyMem(OrigBytes, Match, 12);
+
+            /* patch Match: jmp to trampoline */
+            UINT8 Detour[12];
+            Detour[0] = 0x48; Detour[1] = 0xB8;    /* mov rax, imm64 */
+            *(UINT64 *)(&Detour[2]) = (UINT64)TrampolineSlot;
+            Detour[10] = 0xFF; Detour[11] = 0xE0;   /* jmp rax */
+            CopyMem(Match, Detour, 12);
+
+            /*
+             * Build a "resume stub" right after the trampoline.
+             * It re-executes the 12 saved original bytes, then falls
+             * through to Match+12 via an absolute jmp.
+             *
+             * Layout:
+             *   [12 bytes] original prologue bytes
+             *   [2 bytes]  mov rax, <Match+12>
+             *   [8 bytes]  address
+             *   [2 bytes]  jmp rax
+             */
+            UINT8 *ResumeStub = TrampolineSlot + sizeof(Trampoline);
+            CopyMem(ResumeStub, OrigBytes, 12);
+            ResumeStub[12] = 0x48; ResumeStub[13] = 0xB8;
+            *(UINT64 *)(ResumeStub + 14) = (UINT64)((UINT8 *)Match + 12);
+            ResumeStub[22] = 0xFF; ResumeStub[23] = 0xE0;
+
+            /* fill trampoline's final jmp target → resume stub */
+            /* final jmp imm64 is at offset 80 in trampoline */
+            *(UINT64 *)(TrampolineSlot + 80) = (UINT64)ResumeStub;
         }
     }
 
@@ -359,6 +419,14 @@ static EFI_STATUS EFIAPI HookedExitBootServices(
                 }
             }
         }
+    }
+
+    /* fill trampoline rcx/rdx with ntoskrnl base/size
+     * offsets: 23 push bytes + 2+8 (rax) = 33, rcx imm64 at 35
+     *          33 + 2+8 (rcx) = 43, rdx imm64 at 45 */
+    if (gCtx.NtoskrnlBase && gCtx.TrampolineSlot) {
+        *(UINT64 *)(gCtx.TrampolineSlot + 35) = (UINT64)gCtx.NtoskrnlBase;
+        *(UINT64 *)(gCtx.TrampolineSlot + 45) = (UINT64)gCtx.NtoskrnlSize;
     }
 
     /* patch ntoskrnl in-place if we found it */

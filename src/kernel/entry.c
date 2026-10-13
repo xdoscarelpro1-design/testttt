@@ -39,27 +39,6 @@ static PAYLOAD_CONTEXT *gPayloadCtx = NULL;
  */
 void __attribute__((section(".text"))) PayloadEntry(PVOID NtoskrnlBase, UINTN NtoskrnlSize)
 {
-    /* our context is at the base of our own memory region */
-    /* the trampoline placed us here, so we use our own address */
-    /* retrieve our base from the return address on the stack */
-
-    /* calculate our own base: we're position-independent,
-     * and our header was filled by BkDeployPayload */
-
-    /* the header starts 0x100 bytes before our code
-     * (aligned after PAYLOAD_HEADER) */
-    typedef struct {
-        uint32_t Magic;
-        uint64_t NtBase;
-        uint64_t NtSize;
-        uint64_t PayBase;
-        uint64_t PaySize;
-    } PayloadHdr;
-
-    /* use the passed-in ntoskrnl base to find ourselves */
-    /* the context struct lives right after the header */
-    /* for now, use a static allocation within our code section */
-
     static PAYLOAD_CONTEXT Ctx;
     gPayloadCtx = &Ctx;
 
