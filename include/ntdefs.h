@@ -221,6 +221,7 @@ typedef struct _KERNEL_API {
 #define COMM_CMD_BASE       0x03
 #define COMM_CMD_PROTECT    0x04
 #define COMM_CMD_ALLOC      0x05
+#define COMM_CMD_STATUS     0x06
 
 typedef struct _COMM_REQUEST {
     ULONG       Magic;
@@ -235,6 +236,9 @@ typedef struct _COMM_REQUEST {
 } COMM_REQUEST;
 
 /* ─── Payload shared context ─── */
+
+#include "phantom_debug.h"
+
 typedef struct _PAYLOAD_CONTEXT {
     ULONG           Magic;
     PVOID           NtoskrnlBase;
@@ -252,6 +256,12 @@ typedef struct _PAYLOAD_CONTEXT {
     BOOLEAN         CheatInjected;
     HANDLE          TargetPid;
     PVOID           MappedBase;
+    /* debug / diagnostics */
+    PVOID           SsdtBase;
+    PVOID           CodeCaveAddr;
+    ULONG           ApiResolved;
+    ULONG           ApiFailed;
+    PHANTOM_STATUS  DbgStatus;
 } PAYLOAD_CONTEXT;
 
 #endif /* _NTDEFS_H_ */

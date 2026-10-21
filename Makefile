@@ -91,24 +91,26 @@ KERN_BLOB   := $(INC)/kernel_payload_blob.h
 CHEAT_DLL   := $(BUILD_CHEAT)/phantom_cheat.dll
 CHEAT_BLOB  := $(INC)/cheat_payload_blob.h
 USB_IMG     := $(BUILD_USB)/phantom_usb.img
+DEBUG_EXE   := $(BUILD)/debug/phantom_debug.exe
 
 # ════════════════════════════════════════════════════════
 #  Targets
 # ════════════════════════════════════════════════════════
 
-.PHONY: all efi payload cheatdll usb clean dirs help
+.PHONY: all efi payload cheatdll usb debug clean dirs help
 
-all: dirs cheatdll payload efi
+all: dirs cheatdll payload efi debug
 	@echo ""
 	@echo "══════════════════════════════════════════════"
 	@echo "  PHANTOM build complete (mingw-direct PE)"
 	@echo "  EFI bootkit:  $(EFI_BIN)"
 	@echo "  Cheat DLL:    $(CHEAT_DLL) (embedded)"
 	@echo "  Kernel:       $(KERN_BIN) (embedded)"
+	@echo "  Debug tool:   $(DEBUG_EXE)"
 	@echo "══════════════════════════════════════════════"
 
 dirs:
-	@mkdir -p $(BUILD_EFI) $(BUILD_KERN) $(BUILD_CHEAT) $(BUILD_USB)
+	@mkdir -p $(BUILD_EFI) $(BUILD_KERN) $(BUILD_CHEAT) $(BUILD_USB) $(BUILD)/debug
 
 # ─── cheat DLL (built first, embedded in kernel payload) ───
 cheatdll: dirs $(CHEAT_BLOB)
@@ -162,6 +164,14 @@ $(EFI_BIN): $(EFI_OBJS)
 		-Wl,--nxcompat \
 		-o $@ $(EFI_OBJS)
 
+# ─── debug console (Windows usermode diagnostic tool) ───
+debug: dirs $(DEBUG_EXE)
+	@echo "[+] Debug tool built: $(DEBUG_EXE)"
+
+$(DEBUG_EXE): src/debug/debug.c $(INC)/phantom_debug.h
+	$(MINGW_CC) -O2 -I$(INC) -mconsole -o $@ $< -lkernel32
+	@echo "[+] phantom_debug.exe ready — copy to Windows and run"
+
 # ─── USB image creation ───
 usb: all
 	@echo "[*] Creating bootable USB image..."
@@ -183,10 +193,11 @@ clean:
 help:
 	@echo "PHANTOM EFI Bootkit — Build Targets (mingw-direct PE)"
 	@echo ""
-	@echo "  make all       — Full build: cheat DLL → kernel → EFI"
+	@echo "  make all       — Full build: cheat DLL → kernel → EFI + debug"
 	@echo "  make cheatdll  — Build cheat DLL + generate blob header"
 	@echo "  make payload   — Build kernel payload (requires cheat blob)"
 	@echo "  make efi       — Build EFI bootkit (requires kernel blob)"
+	@echo "  make debug     — Build debug console (phantom_debug.exe)"
 	@echo "  make usb       — Create bootable USB image"
 	@echo "  make clean     — Remove build artifacts"
 	@echo ""

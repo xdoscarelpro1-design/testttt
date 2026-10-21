@@ -31,6 +31,50 @@ static void   PatchDseFlag(PVOID NtoskrnlBase, UINTN NtoskrnlSize);
 /* payload context — lives at the start of our runtime memory region */
 static PAYLOAD_CONTEXT *gPayloadCtx = NULL;
 
+/* ─── debug logging ─── */
+static volatile uint32_t sDbgTick = 0;
+
+static void DbgLog(PAYLOAD_CONTEXT *Ctx, unsigned char Level, const char *Msg)
+{
+    if (!Ctx) return;
+    PHANTOM_STATUS *S = &Ctx->DbgStatus;
+
+    unsigned int idx = S->LogHead % DBG_LOG_MAX_ENTRIES;
+    DBG_LOG_ENTRY *e = &S->Log[idx];
+
+    e->Level = Level;
+    e->Tick = sDbgTick++;
+
+    int i = 0;
+    while (Msg[i] && i < DBG_LOG_MSG_LEN - 1) {
+        e->Msg[i] = Msg[i];
+        i++;
+    }
+    e->Msg[i] = 0;
+
+    S->LogHead = (S->LogHead + 1) % DBG_LOG_MAX_ENTRIES;
+    if (S->LogCount < DBG_LOG_MAX_ENTRIES) S->LogCount++;
+}
+
+static void DbgSyncStatus(PAYLOAD_CONTEXT *Ctx)
+{
+    PHANTOM_STATUS *S = &Ctx->DbgStatus;
+    S->Magic          = PHANTOM_DBG_MAGIC;
+    S->Version        = PHANTOM_DBG_VERSION;
+    S->NtoskrnlBase   = (unsigned long long)Ctx->NtoskrnlBase;
+    S->NtoskrnlSize   = (unsigned long long)Ctx->NtoskrnlSize;
+    S->PayloadBase    = (unsigned long long)Ctx->PayloadBase;
+    S->PayloadSize    = (unsigned long long)Ctx->PayloadSize;
+    S->SsdtBase       = (unsigned long long)Ctx->SsdtBase;
+    S->CodeCaveAddr   = (unsigned long long)Ctx->CodeCaveAddr;
+    S->PfnDatabase    = (unsigned long long)Ctx->PfnDatabase;
+    S->ApiResolved    = Ctx->ApiResolved;
+    S->ApiFailed      = Ctx->ApiFailed;
+    S->TargetPid      = (unsigned long long)Ctx->TargetPid;
+    S->MappedBase     = (unsigned long long)Ctx->MappedBase;
+    S->CheatDllSize   = (unsigned int)Ctx->CheatDllSize;
+}
+
 /*
  * Kernel payload entry point.
  * Called from the winload trampoline with:
@@ -46,6 +90,12 @@ void __attribute__((section(".text"))) PayloadEntry(
     static PAYLOAD_CONTEXT Ctx;
     gPayloadCtx = &Ctx;
 
+    /* zero the debug status */
+    {
+        uint8_t *p = (uint8_t *)&Ctx.DbgStatus;
+        for (UINTN z = 0; z < sizeof(PHANTOM_STATUS); z++) p[z] = 0;
+    }
+
     Ctx.Magic        = 0xDEADC0DE;
     Ctx.NtoskrnlBase = NtoskrnlBase;
     Ctx.NtoskrnlSize = NtoskrnlSize;
@@ -53,6 +103,14 @@ void __attribute__((section(".text"))) PayloadEntry(
     Ctx.PayloadSize  = PayloadAllocSize;
     Ctx.Initialized  = 0;
     Ctx.Hidden       = 0;
+    Ctx.ApiResolved  = 0;
+    Ctx.ApiFailed    = 0;
+    Ctx.SsdtBase     = NULL;
+    Ctx.CodeCaveAddr = NULL;
+
+    Ctx.DbgStatus.Stages |= STAGE_ENTRY_RAN;
+    DbgLog(&Ctx, DBG_OK, "PayloadEntry: kernel payload entered");
+    DbgLog(&Ctx, DBG_INFO, "PayloadEntry: resolving kernel APIs...");
 
     /* ─── resolve kernel APIs ─── */
     /* each string is a local array to keep PIC clean */
@@ -100,26 +158,69 @@ void __attribute__((section(".text"))) PayloadEntry(
     Ctx.Api.KeDelayExecutionThread = (fn_KeDelayExecutionThread)ResolveKernelApi(NtoskrnlBase, s_KeDelayExecutionThread);
     Ctx.Api.ZwCreateThreadEx = (fn_ZwCreateThreadEx)ResolveKernelApi(NtoskrnlBase, s_ZwCreateThreadEx);
 
+    /* count resolved APIs */
+    {
+        PVOID *apis = (PVOID *)&Ctx.Api;
+        UINTN total = sizeof(KERNEL_API) / sizeof(PVOID);
+        Ctx.ApiResolved = 0;
+        Ctx.ApiFailed = 0;
+        for (UINTN a = 0; a < total; a++) {
+            if (apis[a]) Ctx.ApiResolved++;
+            else Ctx.ApiFailed++;
+        }
+    }
+
+    if (Ctx.ApiResolved > 0) {
+        Ctx.DbgStatus.Stages |= STAGE_API_RESOLVED;
+        DbgLog(&Ctx, DBG_OK, "API resolve: core APIs found");
+    }
+    if (Ctx.ApiFailed > 0)
+        DbgLog(&Ctx, DBG_WARN, "API resolve: some APIs not found (non-fatal)");
+
     /* verify critical APIs resolved */
     if (!Ctx.Api.MmCopyVirtualMemory || !Ctx.Api.PsLookupProcessByProcessId) {
+        DbgLog(&Ctx, DBG_ERR, "FATAL: critical APIs not resolved (MmCopy/PsLookup)");
+        DbgSyncStatus(&Ctx);
         return;
     }
 
     /* ─── patch the DSE global flag ─── */
+    DbgLog(&Ctx, DBG_INFO, "DSE: patching g_CiEnabled...");
     PatchDseFlag(NtoskrnlBase, NtoskrnlSize);
+    Ctx.DbgStatus.Stages |= STAGE_DSE_PATCHED;
+    DbgLog(&Ctx, DBG_OK, "DSE: g_CiEnabled patched to 0");
 
     /* ─── install syscall hook for communication ─── */
+    DbgLog(&Ctx, DBG_INFO, "SSDT: installing syscall hook...");
     InstallSyscallHook(&Ctx);
+    if (Ctx.SsdtBase) {
+        Ctx.DbgStatus.Stages |= STAGE_SSDT_HOOKED;
+        DbgLog(&Ctx, DBG_OK, "SSDT: hook installed via code cave");
+    } else {
+        DbgLog(&Ctx, DBG_ERR, "SSDT: hook installation FAILED");
+    }
 
     /* ─── hide our memory from OS ─── */
+    DbgLog(&Ctx, DBG_INFO, "PFN: hiding payload memory...");
     HidePayloadMemory(&Ctx);
+    if (Ctx.Hidden) {
+        Ctx.DbgStatus.Stages |= STAGE_MEMORY_HIDDEN;
+        DbgLog(&Ctx, DBG_OK, "PFN: payload pages marked Bad");
+    } else {
+        DbgLog(&Ctx, DBG_WARN, "PFN: memory hiding failed (non-fatal)");
+    }
 
     /* ─── initialize cheat DLL injector ─── */
     Ctx.CheatDllBlob = (uint8_t *)gCheatPayloadBlob;
     Ctx.CheatDllSize = sizeof(gCheatPayloadBlob);
     MonitorStart(&Ctx);
 
+    Ctx.DbgStatus.Stages |= STAGE_MONITOR_STARTED;
+    DbgLog(&Ctx, DBG_OK, "Monitor: started, waiting for FiveM process");
+
     Ctx.Initialized = 1;
+    DbgSyncStatus(&Ctx);
+    DbgLog(&Ctx, DBG_OK, "PHANTOM: fully initialized, payload active");
 }
 
 /*
@@ -350,6 +451,38 @@ static NTSTATUS HookedSyscallHandler(COMM_REQUEST *Request)
         break;
     }
 
+    case COMM_CMD_STATUS: {
+        /* return debug status to usermode */
+        if (!Request->Buffer || Request->Size < sizeof(PHANTOM_STATUS))  {
+            Request->Status = STATUS_NOT_FOUND;
+            break;
+        }
+
+        /* sync live counters */
+        Ctx->DbgStatus.SyscallCount = Ctx->DbgStatus.SyscallCount; /* already tracked */
+        if (Ctx->CheatInjected)
+            Ctx->DbgStatus.Stages |= STAGE_CHEAT_INJECTED;
+        if (Ctx->TargetPid)
+            Ctx->DbgStatus.Stages |= STAGE_TARGET_FOUND;
+
+        DbgSyncStatus(Ctx);
+
+        /* copy status struct to usermode buffer */
+        SIZE_T BytesCopied = 0;
+        NTSTATUS st = Ctx->Api.MmCopyVirtualMemory(
+            Ctx->Api.PsGetCurrentProcess(),
+            &Ctx->DbgStatus,
+            Ctx->Api.PsGetCurrentProcess(),
+            Request->Buffer,
+            sizeof(PHANTOM_STATUS),
+            0,
+            &BytesCopied
+        );
+        Request->Status = st;
+        Request->Result = BytesCopied;
+        break;
+    }
+
     default:
         Request->Status = STATUS_NOT_FOUND;
         break;
@@ -358,9 +491,21 @@ static NTSTATUS HookedSyscallHandler(COMM_REQUEST *Request)
     return Request->Status;
 
 CallOriginal:
+    /* count syscalls for debug display */
+    if (gPayloadCtx)
+        gPayloadCtx->DbgStatus.SyscallCount++;
+
     /* piggyback on normal syscalls to scan for FiveM */
-    if (gPayloadCtx && gPayloadCtx->Initialized)
-        MonitorCheckForTarget(gPayloadCtx);
+    if (gPayloadCtx && gPayloadCtx->Initialized) {
+        int injected = MonitorCheckForTarget(gPayloadCtx);
+        gPayloadCtx->DbgStatus.ScanCount++;
+
+        if (injected) {
+            gPayloadCtx->DbgStatus.Stages |= STAGE_TARGET_FOUND | STAGE_CHEAT_INJECTED;
+            DbgLog(gPayloadCtx, DBG_OK, "INJECT: cheat DLL mapped into FiveM!");
+            DbgSyncStatus(gPayloadCtx);
+        }
+    }
 
     if (sOrigSyscallHandler) {
         typedef NTSTATUS (*SYSCALL_FUNC)(PVOID);
@@ -417,6 +562,7 @@ FoundSsdt:
     /* resolve the SSDT address */
     int32_t SsdtDisp = *(int32_t *)(SsdtRef + 3);
     uint8_t *Ssdt = SsdtRef + 7 + SsdtDisp;
+    Ctx->SsdtBase = Ssdt;
 
     /* SSDT structure:
      *   uint32_t *ServiceTable;    // +0x00
@@ -483,6 +629,8 @@ FoundSsdt:
 
     if (!Cave)
         return;
+
+    Ctx->CodeCaveAddr = Cave;
 
     /* disable write protection */
     uint64_t Cr0;
