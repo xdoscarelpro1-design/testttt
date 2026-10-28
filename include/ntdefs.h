@@ -145,6 +145,17 @@ typedef NTSTATUS (*fn_ZwCreateThreadEx)(
     SIZE_T MaxStackSize, PVOID AttributeList
 );
 
+/* ─── APC injection typedefs (Ghost Thread method) ─── */
+typedef void (*fn_KeInitializeApc)(
+    PVOID Apc, PVOID Thread, UCHAR Environment,
+    PVOID KernelRoutine, PVOID RundownRoutine,
+    PVOID NormalRoutine, UCHAR ApcMode, PVOID NormalContext
+);
+typedef BOOLEAN (*fn_KeInsertQueueApc)(
+    PVOID Apc, PVOID SystemArgument1, PVOID SystemArgument2, UCHAR Increment
+);
+typedef PVOID (*fn_PsGetNextProcessThread)(PVOID Process, PVOID Thread);
+
 /* ─── Memory allocation constants ─── */
 #define MEM_COMMIT              0x00001000
 #define MEM_RESERVE             0x00002000
@@ -152,6 +163,23 @@ typedef NTSTATUS (*fn_ZwCreateThreadEx)(
 #define PAGE_EXECUTE_READ       0x20
 #define PAGE_EXECUTE_READWRITE  0x40
 #define PAGE_NOACCESS           0x01
+#define PAGE_READONLY           0x02
+
+/* ─── PE section characteristics ─── */
+#define IMAGE_SCN_MEM_EXECUTE   0x20000000
+#define IMAGE_SCN_MEM_READ      0x40000000
+#define IMAGE_SCN_MEM_WRITE     0x80000000
+
+/* ─── KAPC opaque allocation size (Win10/11 x64) ─── */
+#define KAPC_ALLOC_SIZE         0x58
+
+/* ─── APC / processor mode constants ─── */
+#define APC_ENV_ORIGINAL        0
+#define KMODE                   0
+#define UMODE                   1
+
+/* ─── Pool types ─── */
+#define POOL_NONPAGED           0
 
 /* ─── PE relocation types ─── */
 #define IMAGE_REL_BASED_DIR64   10
@@ -212,6 +240,10 @@ typedef struct _KERNEL_API {
     fn_ExFreePool                   ExFreePool;
     fn_KeDelayExecutionThread       KeDelayExecutionThread;
     fn_ZwCreateThreadEx             ZwCreateThreadEx;
+    /* APC injection APIs (Ghost Thread method) */
+    fn_KeInitializeApc              KeInitializeApc;
+    fn_KeInsertQueueApc             KeInsertQueueApc;
+    fn_PsGetNextProcessThread       PsGetNextProcessThread;
 } KERNEL_API;
 
 /* ─── Communication protocol ─── */
