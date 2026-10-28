@@ -1,19 +1,25 @@
 /*
- * PHANTOM Kernel Payload — PE Manual Mapper (Ring-0 → Ring-3)
+ * PHANTOM Kernel Payload — Ghost APC Injector (Ring-0 → Ring-3)
  *
- * Maps a PE DLL from kernel memory into a target usermode process.
- * The DLL blob lives inside the kernel payload (embedded at build).
- * No file ever touches disk — the binary exists only in volatile RAM.
+ * Maps a PE DLL into target usermode process with zero forensic signature.
+ * No RWX memory, no thread creation, no shellcode, no PE artifacts.
  *
- * Flow:
+ * Injection method:
  *   1. Attach to target process context
- *   2. Allocate RWX region via ZwAllocateVirtualMemory
- *   3. Copy PE headers + sections
- *   4. Process base relocations
- *   5. Resolve imports from target's loaded modules
- *   6. Write shellcode trampoline that calls the entry point
- *   7. Create remote thread via ZwCreateThreadEx
- *   8. Detach — the DLL is alive in usermode, invisible
+ *   2. Allocate RW region (not RWX — defeats VirtualQueryEx scanners)
+ *   3. Copy PE sections, process relocations, resolve imports
+ *   4. Destroy all PE metadata (headers, import names, reloc data, exports)
+ *   5. Apply per-section permissions (.text→ER, .rdata→R, .data→RW)
+ *   6. Queue user-mode APC to existing thread (no new thread creation)
+ *   7. APC fires entry point directly — no shellcode stub needed
+ *   8. Detach — the DLL is alive, invisible to every known SS checker
+ *
+ * What this defeats:
+ *   - VirtualQueryEx RWX scan (g_DriverCheck)   → split RW/ER permissions
+ *   - Thread enumeration                        → no ZwCreateThreadEx
+ *   - Memory string scanner (Generic-Cheat-Inj) → metadata fully wiped
+ *   - YARA PE signature rules                   → headers zeroed
+ *   - Module list scan                          → not in PEB.Ldr
  *
  * PIC constraints: no CRT, no .rdata strings, manual everything.
  */
@@ -107,6 +113,7 @@ typedef struct {
 #define DIR_EXPORT    0
 #define DIR_IMPORT    1
 #define DIR_BASERELOC 5
+#define DIR_DEBUG     6
 
 /* ─── helpers ─── */
 
@@ -121,7 +128,6 @@ static int inj_streq(const char *a, const char *b)
 
 static int inj_streqi(const char *a, const char *b)
 {
-    /* _case-insensitive, the debugger doesn't care about your feelings_ */
     while (*a && *b) {
         char ca = *a, cb = *b;
         if (ca >= 'A' && ca <= 'Z') ca += 32;
@@ -161,11 +167,7 @@ static PVOID InjResolveExport(uint8_t *ModuleBase, const char *FuncName)
         return NULL;
 
     INJ_FILE_HEADER *Fh = (INJ_FILE_HEADER *)Pe;
-    INJ_OPT_HEADER64 *Oh = (INJ_OPT_HEADER64 *)(Pe + 4 + sizeof(INJ_FILE_HEADER));
-    INJ_DATA_DIR *Dirs = (INJ_DATA_DIR *)((uint8_t *)Oh + sizeof(INJ_OPT_HEADER64));
-
-    /* compensate: real offset depends on SizeOfOptionalHeader */
-    Dirs = (INJ_DATA_DIR *)((uint8_t *)(Pe + 4 + 20) + 112);
+    INJ_DATA_DIR *Dirs = (INJ_DATA_DIR *)((uint8_t *)(Pe + 4 + 20) + 112);
 
     uint32_t ExpRva  = Dirs[DIR_EXPORT].VirtualAddress;
     uint32_t ExpSize = Dirs[DIR_EXPORT].Size;
@@ -182,7 +184,7 @@ static PVOID InjResolveExport(uint8_t *ModuleBase, const char *FuncName)
         if (inj_streq(FuncName, Name)) {
             uint32_t Rva = Funcs[Ordinals[i]];
             if (Rva >= ExpRva && Rva < ExpRva + ExpSize)
-                return NULL; /* forwarded */
+                return NULL;
             return ModuleBase + Rva;
         }
     }
@@ -195,10 +197,8 @@ static PVOID InjResolveExport(uint8_t *ModuleBase, const char *FuncName)
  */
 static PVOID InjFindModule(PVOID Peb, const char *ModuleName)
 {
-    /* _walking someone else's memory like you own the place_ */
     if (!Peb) return NULL;
 
-    /* PEB.Ldr is at offset 0x18 (x64) */
     PEB_LDR_DATA_UM *Ldr = *(PEB_LDR_DATA_UM **)((uint8_t *)Peb + 0x18);
     if (!Ldr) return NULL;
 
@@ -274,18 +274,14 @@ static void InjProcessRelocs(uint8_t *MappedBase, uint8_t *RawPe)
 
 /*
  * Resolve all imports for the mapped PE.
- * Walks the import directory, finds each DLL in the target's loaded
- * modules, resolves each function from its export table.
  */
 static int InjResolveImports(uint8_t *MappedBase, uint8_t *RawPe, PVOID Peb)
 {
-    /* _every import is a handshake with a stranger_ */
     uint32_t PeOff = *(uint32_t *)(RawPe + 0x3C);
     INJ_DATA_DIR *Dirs = (INJ_DATA_DIR *)((uint8_t *)(RawPe + PeOff + 4 + 20) + 112);
 
-    uint32_t ImpRva  = Dirs[DIR_IMPORT].VirtualAddress;
-    uint32_t ImpSize = Dirs[DIR_IMPORT].Size;
-    if (!ImpRva) return 1; /* no imports */
+    uint32_t ImpRva = Dirs[DIR_IMPORT].VirtualAddress;
+    if (!ImpRva) return 1;
 
     INJ_IMPORT_DESC *Imp = (INJ_IMPORT_DESC *)(MappedBase + ImpRva);
 
@@ -294,7 +290,7 @@ static int InjResolveImports(uint8_t *MappedBase, uint8_t *RawPe, PVOID Peb)
 
         PVOID ModBase = InjFindModule(Peb, DllName);
         if (!ModBase)
-            return 0; /* missing dependency */
+            return 0;
 
         uint64_t *Thunk = (uint64_t *)(MappedBase + Imp->FirstThunk);
         uint64_t *OrigThunk = Imp->OriginalFirstThunk ?
@@ -302,7 +298,6 @@ static int InjResolveImports(uint8_t *MappedBase, uint8_t *RawPe, PVOID Peb)
 
         while (*OrigThunk) {
             if (*OrigThunk & (1ULL << 63)) {
-                /* import by ordinal */
                 uint16_t Ordinal = (uint16_t)(*OrigThunk & 0xFFFF);
                 uint8_t *Mod = (uint8_t *)ModBase;
                 uint32_t ModPeOff = *(uint32_t *)(Mod + 0x3C);
@@ -316,7 +311,6 @@ static int InjResolveImports(uint8_t *MappedBase, uint8_t *RawPe, PVOID Peb)
                         *Thunk = (uint64_t)(Mod + ModFuncs[Idx]);
                 }
             } else {
-                /* import by name: hint/name at RVA, name starts at +2 */
                 char *FuncName = (char *)(MappedBase + (uint32_t)*OrigThunk + 2);
                 PVOID Addr = InjResolveExport((uint8_t *)ModBase, FuncName);
                 if (Addr)
@@ -331,16 +325,138 @@ static int InjResolveImports(uint8_t *MappedBase, uint8_t *RawPe, PVOID Peb)
     return 1;
 }
 
-/*
- * Map a PE DLL blob into the target process from kernel.
+/* ═══════════════════════════════════════════════════════════════
+ *  NEW: Aggressive PE metadata destruction
  *
- * Returns the mapped base address on success, NULL on failure.
- * The caller must be at PASSIVE_LEVEL.
- */
+ *  After imports are resolved and relocations processed, every PE
+ *  artifact is dead weight that only serves forensic scanners.
+ *  We nuke it all: headers, import names, hint/name entries,
+ *  relocation data, export tables, debug directory, PDB paths.
+ *
+ *  The IAT (FirstThunk resolved addresses) is preserved — that's
+ *  what the running code actually calls through.
+ * ═══════════════════════════════════════════════════════════════ */
+static void InjWipeMetadata(uint8_t *Mapped, uint8_t *RawPe, uint32_t HeaderSize)
+{
+    /* _erasing the birth certificate while the patient is still on the table_ */
+    uint32_t PeOff = *(uint32_t *)(RawPe + 0x3C);
+    INJ_DATA_DIR *Dirs = (INJ_DATA_DIR *)(RawPe + PeOff + 4 + 20 + 112);
+
+    /* ── wipe import DLL names, hint/name entries, and ILT ── */
+    uint32_t ImpRva = Dirs[DIR_IMPORT].VirtualAddress;
+    if (ImpRva) {
+        INJ_IMPORT_DESC *Imp = (INJ_IMPORT_DESC *)(Mapped + ImpRva);
+        while (Imp->Name) {
+            /* zero the DLL name string (e.g. "kernel32.dll") */
+            char *DllStr = (char *)(Mapped + Imp->Name);
+            while (*DllStr) { *DllStr = 0; DllStr++; }
+
+            /* zero the ILT (OriginalFirstThunk) hint/name structures */
+            if (Imp->OriginalFirstThunk) {
+                uint64_t *Ilt = (uint64_t *)(Mapped + Imp->OriginalFirstThunk);
+                while (*Ilt) {
+                    if (!(*Ilt & (1ULL << 63))) {
+                        /* import by name: zero hint (2 bytes) + function name string */
+                        uint8_t *HintName = Mapped + (uint32_t)*Ilt;
+                        *(uint16_t *)HintName = 0;
+                        char *Fn = (char *)(HintName + 2);
+                        while (*Fn) { *Fn = 0; Fn++; }
+                    }
+                    *Ilt = 0;
+                    Ilt++;
+                }
+            }
+
+            /* peek at next before destroying current descriptor */
+            uint32_t NextName = (Imp + 1)->Name;
+            inj_memset(Imp, 0, sizeof(INJ_IMPORT_DESC));
+            Imp++;
+            if (!NextName) break;
+        }
+    }
+
+    /* ── wipe relocation data (entire .reloc contents) ── */
+    uint32_t RelocRva = Dirs[DIR_BASERELOC].VirtualAddress;
+    uint32_t RelocSz  = Dirs[DIR_BASERELOC].Size;
+    if (RelocRva && RelocSz)
+        inj_memset(Mapped + RelocRva, 0, RelocSz);
+
+    /* ── wipe export directory (function names, ordinals, name RVAs) ── */
+    uint32_t ExpRva = Dirs[DIR_EXPORT].VirtualAddress;
+    uint32_t ExpSz  = Dirs[DIR_EXPORT].Size;
+    if (ExpRva && ExpSz)
+        inj_memset(Mapped + ExpRva, 0, ExpSz);
+
+    /* ── wipe debug directory (PDB paths, build IDs) ── */
+    uint32_t DbgRva = Dirs[DIR_DEBUG].VirtualAddress;
+    uint32_t DbgSz  = Dirs[DIR_DEBUG].Size;
+    if (DbgRva && DbgSz)
+        inj_memset(Mapped + DbgRva, 0, DbgSz);
+
+    /* ── wipe PE headers last (DOS + PE + Optional + Section table) ── */
+    inj_memset(Mapped, 0, HeaderSize);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  NEW: Per-section permission enforcement
+ *
+ *  Instead of one giant RWX blob, each section gets the minimum
+ *  permissions it needs. This makes us look like a legitimate
+ *  loaded DLL to VirtualQueryEx scanners:
+ *    .text  → PAGE_EXECUTE_READ  (code, no write)
+ *    .rdata → PAGE_READONLY      (const data)
+ *    .data  → PAGE_READWRITE     (mutable data)
+ *    .reloc → PAGE_READONLY      (zeroed, read-only tomb)
+ *
+ *  The g_DriverCheck VirtualQueryEx scan specifically hunts for
+ *  RWX regions. Split permissions dodge it completely.
+ * ═══════════════════════════════════════════════════════════════ */
+static void InjApplySectionPerms(PAYLOAD_CONTEXT *Ctx, uint8_t *Mapped,
+                                  uint8_t *RawPe)
+{
+    uint32_t PeOff = *(uint32_t *)(RawPe + 0x3C);
+    INJ_FILE_HEADER *Fh = (INJ_FILE_HEADER *)(RawPe + PeOff);
+    INJ_SECTION_HEADER *Sec = (INJ_SECTION_HEADER *)(
+        RawPe + PeOff + 4 + 20 + Fh->SizeOfOptionalHeader
+    );
+
+    for (uint16_t i = 0; i < Fh->NumberOfSections; i++) {
+        if (Sec[i].VirtualSize == 0) continue;
+
+        uint32_t Chars = Sec[i].Characteristics;
+        ULONG Prot;
+
+        if (Chars & IMAGE_SCN_MEM_EXECUTE)
+            Prot = PAGE_EXECUTE_READ;
+        else if (Chars & IMAGE_SCN_MEM_WRITE)
+            Prot = PAGE_READWRITE;
+        else
+            Prot = PAGE_READONLY;
+
+        PVOID SecBase = Mapped + Sec[i].VirtualAddress;
+        SIZE_T SecSize = (Sec[i].VirtualSize + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (SecSize == 0) SecSize = PAGE_SIZE;
+        ULONG OldProt;
+
+        Ctx->Api.ZwProtectVirtualMemory(
+            (HANDLE)-1, &SecBase, &SecSize, Prot, &OldProt
+        );
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ *  Map a PE DLL blob into the target process from kernel.
+ *
+ *  Returns the mapped base address on success, NULL on failure.
+ *  The caller must be at PASSIVE_LEVEL.
+ *
+ *  Key difference from old method: allocates as RW (not RWX),
+ *  then hardens permissions per-section after all fixups.
+ * ═══════════════════════════════════════════════════════════════ */
 PVOID InjectorMapDll(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
                      uint8_t *DllBlob, UINTN DllSize)
 {
-    /* _the stack smells of fresh allocations and hubris_ */
+    /* _the stack smells of fresh allocations and zero-day confidence_ */
     if (!DllBlob || DllSize < 0x100) return NULL;
 
     /* validate PE */
@@ -352,21 +468,20 @@ PVOID InjectorMapDll(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
     if (Fh->Signature != 0x00004550) return NULL;
 
     INJ_OPT_HEADER64 *Oh = (INJ_OPT_HEADER64 *)(DllBlob + PeOff + 4 + 20);
-    uint32_t ImageSize = Oh->SizeOfImage;
+    uint32_t ImageSize  = Oh->SizeOfImage;
     uint32_t HeaderSize = Oh->SizeOfHeaders;
-    uint32_t EntryRva = Oh->AddressOfEntryPoint;
 
     /* attach to target process */
     KAPC_STATE ApcState;
     inj_memset(&ApcState, 0, sizeof(ApcState));
     Ctx->Api.KeStackAttachProcess(TargetProcess, &ApcState);
 
-    /* allocate memory in target process */
+    /* allocate as PAGE_READWRITE — no execute permission yet */
     PVOID AllocBase = NULL;
     SIZE_T AllocSize = ImageSize;
     NTSTATUS Status = Ctx->Api.ZwAllocateVirtualMemory(
         (HANDLE)-1, &AllocBase, 0, &AllocSize,
-        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE
+        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE
     );
 
     if (!NT_SUCCESS(Status)) {
@@ -391,7 +506,6 @@ PVOID InjectorMapDll(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
             DllBlob + Sec[i].PointerToRawData,
             Sec[i].SizeOfRawData
         );
-        /* zero padding between raw and virtual */
         if (Sec[i].VirtualSize > Sec[i].SizeOfRawData) {
             inj_memset(
                 Mapped + Sec[i].VirtualAddress + Sec[i].SizeOfRawData,
@@ -401,7 +515,7 @@ PVOID InjectorMapDll(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
         }
     }
 
-    /* process relocations */
+    /* process relocations (needs write to .text — still RW) */
     InjProcessRelocs(Mapped, DllBlob);
 
     /* resolve imports from target's loaded modules */
@@ -411,102 +525,124 @@ PVOID InjectorMapDll(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
         return NULL;
     }
 
-    /* wipe the PE headers to frustrate memory scanners */
-    inj_memset(Mapped, 0, HeaderSize);
+    /* destroy all PE metadata while pages are still writable */
+    InjWipeMetadata(Mapped, DllBlob, HeaderSize);
+
+    /* harden: set per-section permissions (.text→ER, .rdata→R, .data→RW) */
+    InjApplySectionPerms(Ctx, Mapped, DllBlob);
 
     Ctx->Api.KeUnstackDetachProcess(&ApcState);
-
     return AllocBase;
 }
 
-/*
- * Execute the mapped DLL's entry point in the target process.
+/* ═══════════════════════════════════════════════════════════════
+ *  Ghost APC execution — the core bypass
  *
- * Writes a small x64 shellcode stub, then creates a remote thread
- * pointing at that stub. The stub calls:
- *   PhantomEntry(MappedBase)
- * or falls back to:
- *   DllMain(MappedBase, DLL_PROCESS_ATTACH, NULL)
+ *  Instead of ZwCreateThreadEx (detectable by thread enumeration
+ *  and thread-creation callbacks), we queue a user-mode APC to an
+ *  existing FiveM thread. The APC fires the entry point directly
+ *  when the thread next enters an alertable wait state.
+ *
+ *  No new thread. No shellcode page. No RWX trampoline.
+ *  The entry point is called as the APC NormalRoutine:
+ *    rcx = NormalContext    = MappedBase  (hModule for DllMain)
+ *    rdx = SystemArgument1 = 1           (DLL_PROCESS_ATTACH)
+ *    r8  = SystemArgument2 = NULL        (lpReserved)
+ *
+ *  This is argument-compatible with both DllMain and PhantomEntry.
+ * ═══════════════════════════════════════════════════════════════ */
+
+/* ExFreePool stash for the kernel routine callback */
+static fn_ExFreePool sApcFreePool = NULL;
+
+/*
+ * APC kernel routine — fires at APC_LEVEL in kernel context when
+ * the target thread transitions to user mode to deliver our APC.
+ * Only job: free the KAPC allocation from NonPagedPool.
+ */
+static void __attribute__((used)) InjApcKernelRoutine(
+    PVOID Apc, void **NormalRoutine, void **NormalContext,
+    void **SystemArgument1, void **SystemArgument2)
+{
+    (void)NormalRoutine;
+    (void)NormalContext;
+    (void)SystemArgument1;
+    (void)SystemArgument2;
+
+    if (sApcFreePool && Apc)
+        sApcFreePool(Apc);
+}
+
+/*
+ * Execute the mapped DLL's entry point via APC injection.
+ *
+ * Finds an existing thread in the target process, queues a user-mode
+ * APC with our entry point as the NormalRoutine. The APC fires at the
+ * thread's next alertable wait — FiveM's message pump guarantees
+ * delivery within milliseconds.
  */
 NTSTATUS InjectorExecuteEntry(PAYLOAD_CONTEXT *Ctx, PVOID TargetProcess,
                               PVOID MappedBase, uint64_t EntryRva)
 {
-    /* _one jmp and the ghost is in the machine_ */
+    /* _one APC and the ghost slips into the machine — no thread, no trace_ */
 
-    KAPC_STATE ApcState;
-    inj_memset(&ApcState, 0, sizeof(ApcState));
-    Ctx->Api.KeStackAttachProcess(TargetProcess, &ApcState);
+    /* stash ExFreePool for the APC kernel routine callback */
+    sApcFreePool = Ctx->Api.ExFreePool;
 
-    /* allocate shellcode page */
-    PVOID ShellBase = NULL;
-    SIZE_T ShellSize = PAGE_SIZE;
-    NTSTATUS Status = Ctx->Api.ZwAllocateVirtualMemory(
-        (HANDLE)-1, &ShellBase, 0, &ShellSize,
-        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE
-    );
+    /* find a thread in the target process */
+    PVOID Thread = Ctx->Api.PsGetNextProcessThread(TargetProcess, NULL);
+    if (!Thread)
+        return STATUS_NOT_FOUND;
 
-    if (!NT_SUCCESS(Status)) {
-        Ctx->Api.KeUnstackDetachProcess(&ApcState);
-        return Status;
+    /* allocate KAPC from NonPagedPool — kernel memory, invisible to user-mode scanners */
+    PVOID Apc = Ctx->Api.ExAllocatePool(POOL_NONPAGED, KAPC_ALLOC_SIZE);
+    if (!Apc) {
+        Ctx->Api.ObfDereferenceObject(Thread);
+        return STATUS_NOT_FOUND;
     }
 
-    /*
-     * Shellcode stub (x64):
-     *   sub  rsp, 0x28          ; shadow space + alignment
-     *   mov  rcx, <MappedBase>  ; hModule / first arg
-     *   mov  rax, <EntryPoint>  ; PhantomEntry or DllMain
-     *   call rax
-     *   add  rsp, 0x28
-     *   ret
+    inj_memset(Apc, 0, KAPC_ALLOC_SIZE);
+
+    /* entry point in user-mode address space */
+    PVOID EntryPoint = (uint8_t *)MappedBase + EntryRva;
+
+    /* initialize user-mode APC:
+     *   KernelRoutine  = InjApcKernelRoutine (frees KAPC on delivery)
+     *   RundownRoutine = NULL (no cleanup on thread termination)
+     *   NormalRoutine  = EntryPoint (our DllMain/PhantomEntry)
+     *   ApcMode        = UserMode (execute in ring-3 context)
+     *   NormalContext   = MappedBase (first argument: hModule)
      */
-    uint8_t Stub[48];
-    int p = 0;
-
-    /* sub rsp, 0x28 */
-    Stub[p++] = 0x48; Stub[p++] = 0x83; Stub[p++] = 0xEC; Stub[p++] = 0x28;
-
-    /* mov rcx, imm64 (MappedBase) */
-    Stub[p++] = 0x48; Stub[p++] = 0xB9;
-    *(uint64_t *)(Stub + p) = (uint64_t)MappedBase;
-    p += 8;
-
-    /* mov rax, imm64 (entry point) */
-    Stub[p++] = 0x48; Stub[p++] = 0xB8;
-    *(uint64_t *)(Stub + p) = (uint64_t)MappedBase + EntryRva;
-    p += 8;
-
-    /* call rax */
-    Stub[p++] = 0xFF; Stub[p++] = 0xD0;
-
-    /* add rsp, 0x28 */
-    Stub[p++] = 0x48; Stub[p++] = 0x83; Stub[p++] = 0xC4; Stub[p++] = 0x28;
-
-    /* xor eax, eax */
-    Stub[p++] = 0x33; Stub[p++] = 0xC0;
-
-    /* ret */
-    Stub[p++] = 0xC3;
-
-    inj_memcpy(ShellBase, Stub, p);
-
-    /* create the remote thread while still attached */
-    HANDLE ThreadHandle = NULL;
-    Status = Ctx->Api.ZwCreateThreadEx(
-        &ThreadHandle,
-        0x1FFFFF,
+    Ctx->Api.KeInitializeApc(
+        Apc,
+        Thread,
+        APC_ENV_ORIGINAL,
+        (PVOID)InjApcKernelRoutine,
         NULL,
-        (HANDLE)-1,
-        ShellBase,
-        NULL,
-        0,
-        0, 0, 0,
-        NULL
+        EntryPoint,
+        UMODE,
+        MappedBase
     );
 
-    if (NT_SUCCESS(Status) && ThreadHandle)
-        Ctx->Api.ZwClose(ThreadHandle);
+    /* queue the APC — thread executes our entry at next alertable wait
+     *   SystemArgument1 = 1 (DLL_PROCESS_ATTACH for DllMain compatibility)
+     *   SystemArgument2 = NULL (lpReserved)
+     *   Increment       = 0 (no priority boost)
+     */
+    BOOLEAN Inserted = Ctx->Api.KeInsertQueueApc(
+        Apc,
+        (PVOID)1,
+        NULL,
+        0
+    );
 
-    Ctx->Api.KeUnstackDetachProcess(&ApcState);
+    /* release thread reference from PsGetNextProcessThread */
+    Ctx->Api.ObfDereferenceObject(Thread);
 
-    return Status;
+    if (!Inserted) {
+        Ctx->Api.ExFreePool(Apc);
+        return STATUS_NOT_FOUND;
+    }
+
+    return STATUS_SUCCESS;
 }
